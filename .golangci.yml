@@ -1,0 +1,97 @@
+linters:
+  enable-all: true
+  disable:
+    # exhaustivestruct will enforce that every field of an imported struct is
+    # set. This is overkill, we can rely on implicitly set data.
+    - exhaustivestruct
+    - exhaustruct
+
+    # deprecated linters
+    - maligned
+    - varcheck
+    - structcheck
+    - ifshort
+    - golint
+    - scopelint
+    - deadcode
+    - interfacer
+    - rowserrcheck
+    - sqlclosecheck
+    - wastedassign
+
+    # This will unreliably flag things that are not duplications.
+    - dupl
+
+    # nosnakecase will prevent a user from defining functionality with snake
+    # case. This is good, in general, but some  native go functionality requires
+    #  this, such as testable examples.
+    - nosnakecase
+
+    # tagliatelle enforces camel case for json tags. We can't control how web
+    # APIs setup their json responses so this is not practical.
+    - tagliatelle
+
+    # testpackage requires that all tests be written in their own package. I.e.
+    # if you're testing in package "a", this linter wants the tests to be
+    # written in "a_test". This doesn't work for unit testing unexported data,
+    # however.
+    - testpackage
+
+    # TODO: Remove these before 1.0
+    - depguard
+    - godox
+    - cyclop
+    - gomnd
+    - err113
+    - mnd
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        # Tests are allowed to have complexity.
+        - cyclop
+        - gocognit
+        - funlen
+        - gochecknoglobals
+        - goerr113
+        - maintidx
+        - lll
+        - wsl
+        - varnamelen
+        - perfsprint
+        - musttag
+        - copyloopvar
+    - path: proto/*
+      linters:
+        - goimports
+        - revive
+  exclude:
+    - ST1000 # Requiring package comments interferes with copyright notice.
+  exclude-use-default: false
+
+linters-settings:
+  varnamelen:
+    ignore-names:
+      - wg  # for wait groups
+      - i   # for indexing
+      - w   # for writers
+      - rw  # for reader-writers
+      - n   # n is commonly used as the size of a buffer after readjk:w
+      - wd  # working directory
+      - f   # file
+      - db  # database
+      - r   # reader
+  revive:
+    severity: warning
+    rules:
+      - name: empty-lines
+      - name: line-length-limit
+        severity: error
+        arguments: [120]
+      - name: import-shadowing
+      - name: unnecessary-stmt
+      - name: exported
+        arguments: [ "checkPrivateReceivers", "sayRepetitiveInsteadOfStutters" ]
+

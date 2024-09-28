@@ -1,0 +1,317 @@
+cipher: "aes-gcm"
+cases: 
+  - name: "single file"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world!"
+            tags: ["tag1"]
+      - action: "pull"
+    want: 
+      - name: "file1.txt"
+        data: "hello world!"
+        tags: ["tag1"]
+
+  - name: "re-tag file"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world!"
+            tags: ["tag1"]
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world!"
+            tags: ["tag2"]
+      - action: "pull"
+    want: 
+      - name: "file1.txt"
+        data: "hello world!"
+        tags: ["tag1", "tag2"]
+
+  - name: "duplicate tags"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world!"
+            tags: ["tag1"]
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world!"
+            tags: ["tag1"]
+      - action: "pull"
+    want: 
+      - name: "file1.txt"
+        data: "hello world!"
+        tags: ["tag1"]
+
+  - name: "filter name"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world!"
+      - action: "pull"
+        args: 
+          - filter: "n =~ 'file'"
+    want: 
+      - name: "file1.txt"
+        data: "hello world!"
+
+  - name: "filter exact size"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world!"
+          - name: "file2.txt"
+            data: "Drink more ovaltine? How do you know that reference?"
+      - action: "pull"
+        args: 
+          - filter: "s == 52"
+    want: 
+      - name: "file2.txt"
+        data: "Drink more ovaltine? How do you know that reference?"
+
+  - name: "filter lt"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world!"
+          - name: "file2.txt"
+            data: "Drink more ovaltine? How do you know that reference?"
+      - action: "pull"
+        args: 
+          - filter: "s < 52"
+    want: 
+      - name: "file1.txt"
+        data: "hello world!"
+
+  - name: "filter lte"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world!"
+          - name: "file2.txt"
+            data: "Drink more ovaltine? How do you know that reference?"
+      - action: "pull"
+        args: 
+          - filter: "s <= 52"
+    want: 
+      - name: "file1.txt"
+        data: "hello world!"
+      - name: "file2.txt"
+        data: "Drink more ovaltine? How do you know that reference?"
+
+  - name: "filter name not match"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world!"
+      - action: "pull"
+        args: 
+          - filter: "n =~ 'file2'"
+    want: []
+
+  - name: "filter name through many files"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+          - name: "file2.txt"
+            data: "hello world B!"
+          - name: "file3.txt"
+            data: "hello world C!"
+      - action: "pull"
+        args: 
+          - filter: "n =~ 'file2'"
+    want:
+      - name: "file2.txt"
+        data: "hello world B!"
+
+  - name: "filter tags"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1"]
+          - name: "file2.txt"
+            data: "hello world B!"
+            tags: ["tag2"]
+          - name: "file3.txt"
+            data: "hello world C!"
+            tags: ["tag1"]
+      - action: "pull"
+        args: 
+          - filter: "t('tag1')"
+    want:
+      - name: "file1.txt"
+        data: "hello world A!"
+        tags: ["tag1"]
+      - name: "file3.txt"
+        data: "hello world C!"
+        tags: ["tag1"]
+
+  - name: "filter tags and name"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1"]
+          - name: "file2.txt"
+            data: "hello world B!"
+            tags: ["tag2"]
+          - name: "foo.txt"
+            data: "hello world C!"
+            tags: ["tag1"]
+      - action: "pull"
+        args: 
+          - filter: "t('tag1') && n =~ 'file1'"
+    want:
+      - name: "file1.txt"
+        data: "hello world A!"
+        tags: ["tag1"]
+
+  - name: "revert push"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1"]
+            sha: aa41a0de-a58c-4e96-8e38-c2ec39638b61
+      - action: "revert"
+        args: 
+          - shas: [aa41a0de-a58c-4e96-8e38-c2ec39638b61]
+      - action: "pull"
+    want: []
+
+  - name: "revert multi-file push"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1"]
+            sha: aa41a0de-a58c-4e96-8e38-c2ec39638b61
+          - name: "fileb.txt"
+            data: "hello world B!"
+            tags: ["tag1"]
+            sha: aa41a0de-a58c-4e96-8e38-c2ec39638b61
+      - action: "revert"
+        args: 
+          - shas: [aa41a0de-a58c-4e96-8e38-c2ec39638b61]
+      - action: "pull"
+    want: []
+
+  - name: "revert old push"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1"]
+            sha: aa41a0de-a58c-4e96-8e38-c2ec39638b61
+      - action: "push"
+        args:
+          - name: "file2.txt"
+            data: "hello world B!"
+            tags: ["tag1"]
+      - action: "revert"
+        args: 
+          - shas: [aa41a0de-a58c-4e96-8e38-c2ec39638b61]
+      - action: "pull"
+    want:
+      - name: "file2.txt"
+        data: "hello world B!"
+        tags: ["tag1"]
+
+  - name: "update tags"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1"]
+      - action: "pull"
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag2"]
+      - action: "pull"
+    want:
+      - name: "file1.txt"
+        data: "hello world A!"
+        tags: ["tag1", "tag2"]
+
+  - name: "tag inclusivity"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1", "tag2"]
+          - name: "file2.txt"
+            data: "hello world B!"
+            tags: ["tag2"]
+      - action: "pull"
+        args: 
+          - filter: "ti('tag1','tag2')"
+    want:
+      - name: "file1.txt"
+        data: "hello world A!"
+        tags: ["tag1", "tag2"]
+
+  - name: "migrate"
+    operations:
+      - action: "push"
+        bucket: "bucketOne"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1"]
+      - action: "pull"
+        bucket: "bucketOne"
+      - action: "migrate"
+        migrationSrc: "bucketOne"
+        migrationTarget: "bucketTwo"
+        args: 
+          - name: "file1.txt"
+            tags: ["tag2"]  
+      - action: "pull"
+        bucket: "bucketTwo"
+    want:
+      - name: "file1.txt"
+        data: "hello world A!"
+        tags: ["tag1", "tag2"]
+
+  - name: "migrate no change"
+    operations:
+      - action: "push"
+        bucket: "bucketOne"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+      - action: "pull"
+        bucket: "bucketOne"
+      - action: "migrate"
+        migrationSrc: "bucketOne"
+        migrationTarget: "bucketTwo"
+        args: 
+          - name: "file1.txt"
+      - action: "pull"
+        bucket: "bucketTwo"
+    want:
+      - name: "file1.txt"
+        data: "hello world A!"

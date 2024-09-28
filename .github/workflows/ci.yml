@@ -1,0 +1,56 @@
+name: Run Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-diskhop:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+
+    - name: Install Mage
+      run: go install github.com/magefile/mage@latest
+
+    # Required for tagging on linux
+    - name: Install attr for extended attributes
+      run: sudo apt-get update && sudo apt-get install -y attr
+
+    - name: Run Tests
+      run: mage Test
+
+  test-mongo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Run Mage
+        uses: magefile/mage-action@v3
+        with:
+          install-only: true
+
+      # Required for tagging on linux
+      - name: Install attr for extended attributes
+        run: sudo apt-get update && sudo apt-get install -y attr
+
+      - name: Run Tests
+        run: mage testMongo
