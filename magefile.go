@@ -91,7 +91,7 @@ func Build() error {
 		return errors.New("GOPATH is not set")
 	}
 
-	binPath := filepath.Join(gopath, "bin", "bdop")
+	binPath := filepath.Join(gopath, "bin", "dop")
 	if err := os.Rename("diskhop-beta", binPath); err != nil {
 		return fmt.Errorf("Failed to move binary to %s: %v", binPath, err)
 	}

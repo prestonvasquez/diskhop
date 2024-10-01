@@ -12,5 +12,3 @@ Diskhop is a versatile library designed for efficiently pulling and pushing loca
 - Go Gopher artwork by [Victoria Trum](https://www.fiverr.com/victoria_trum?source=order_page_user_message_link)
 - The original Go gopher was designed by the awesome [Renee French](http://reneefrench.blogspot.com/)
 
-
-# diskhop

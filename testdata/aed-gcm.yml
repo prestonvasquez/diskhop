@@ -24,7 +24,7 @@ cases:
         args:
           - name: "file1.txt"
             data: "hello world!"
-            tags: ["tag2"]
+            tags: ["tag1", "tag2"]
       - action: "pull"
     want: 
       - name: "file1.txt"
@@ -248,7 +248,7 @@ cases:
         args:
           - name: "file1.txt"
             data: "hello world A!"
-            tags: ["tag2"]
+            tags: ["tag1", "tag2"]
       - action: "pull"
     want:
       - name: "file1.txt"
@@ -315,3 +315,22 @@ cases:
     want:
       - name: "file1.txt"
         data: "hello world A!"
+
+  - name: "reduce tags"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1", "tag2"]
+      - action: "pull"
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag3"]
+      - action: "pull"
+    want:
+      - name: "file1.txt"
+        data: "hello world A!"
+        tags: ["tag3"]

@@ -135,6 +135,9 @@ func (p *Pusher) pushEncrypted(
 	newMeta := meta == nil
 	if newMeta {
 		meta = newGridFSMetadata(opts.Tags)
+	} else {
+		// If the metadata already exists, remove the tags
+		meta.Diskhop.Tags = nil
 	}
 
 	if newMeta {
