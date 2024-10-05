@@ -18,10 +18,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"crypto/aes"
 	"crypto/cipher"
 
+	"github.com/olekukonko/tablewriter"
 	"github.com/prestonvasquez/diskhop"
 	"github.com/prestonvasquez/diskhop/exp/dcrypto"
 	"github.com/prestonvasquez/diskhop/store"
@@ -83,6 +85,10 @@ func runPull(cmd *cobra.Command, _ []string, opts store.PullOptions) error {
 	go func() {
 		defer close(trackerDone)
 
+		if opts.DescribeOnly {
+			return
+		}
+
 		total := <-dp.Total()
 		bar := progressbar.NewOptions(total,
 			progressbar.OptionEnableColorCodes(true),
@@ -124,11 +130,30 @@ func runPull(cmd *cobra.Command, _ []string, opts store.PullOptions) error {
 		pullOpts = append(pullOpts, store.WithPullSealOpener(so))
 	}
 
-	if err := dp.Pull(cmd.Context(), pullOpts...); err != nil {
+	desc, err := dp.Pull(cmd.Context(), pullOpts...)
+	if err != nil {
 		return fmt.Errorf("failed to push: %w", err)
 	}
 
 	<-trackerDone
+
+	fmt.Println(desc)
+
+	description := [][]string{
+		[]string{strconv.Itoa(desc.FileCount)},
+	}
+
+	// Create a new tablewriter instance with os.Stdout as output
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"File Count"})
+
+	// Append data to the table
+	for _, v := range description {
+		table.Append(v)
+	}
+
+	// Render the table
+	table.Render() // Send output to stdout
 
 	return nil
 }
@@ -146,6 +171,8 @@ func newPullCommand() *cobra.Command {
 
 	cmd.Flags().IntVar(&flags.SampleSize, "sample", defaultSampeSize, "chose a random subset of data")
 	cmd.Flags().StringVarP(&flags.Filter, "filter", "f", "", "filter documents by expression")
+	cmd.Flags().BoolVarP(&flags.DescribeOnly, "describe", "d", false, "describe the query without actually pulling data")
+	cmd.Flags().IntVarP(&flags.Workers, "workers", "w", 1, "number of workers to use")
 
 	cmd.Run = func(cmd *cobra.Command, args []string) {
 		if err := runPull(cmd, args, flags); err != nil {

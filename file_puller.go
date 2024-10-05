@@ -40,17 +40,26 @@ func NewFilePuller(p store.Puller) *FilePuller {
 	}
 }
 
-func (fp *FilePuller) Pull(ctx context.Context, opts ...store.PullOption) error {
+func (fp *FilePuller) Pull(ctx context.Context, opts ...store.PullOption) (*store.PullDescription, error) {
 	buf := store.NewDocumentBuffer()
 	defer buf.Close()
 
-	count, err := fp.p.Pull(ctx, buf, opts...)
+	desc, err := fp.p.Pull(ctx, buf, opts...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	fp.totalCh <- count
-	fp.progressCh = make(chan struct{}, count)
+	mergedOpts := store.PullOptions{}
+	for _, opt := range opts {
+		opt(&mergedOpts)
+	}
+
+	if mergedOpts.DescribeOnly {
+		return desc, nil
+	}
+
+	fp.totalCh <- desc.FileCount
+	fp.progressCh = make(chan struct{}, desc.FileCount)
 
 	defer close(fp.totalCh)
 	defer close(fp.progressCh)
@@ -63,16 +72,16 @@ func (fp *FilePuller) Pull(ctx context.Context, opts ...store.PullOption) error 
 
 		file, err := os.Create(doc.Filename)
 		if err != nil {
-			return fmt.Errorf("failed to create file: %w", err)
+			return nil, fmt.Errorf("failed to create file: %w", err)
 		}
 
 		if _, err := file.Write(doc.Data); err != nil {
-			return fmt.Errorf("failed to write file: %w", err)
+			return nil, fmt.Errorf("failed to write file: %w", err)
 		}
 
 		if tags := doc.Metadata.Tags; len(tags) > 0 {
 			if err := osutil.SetTags(file, tags...); err != nil {
-				return fmt.Errorf("failed to set tags: %w", err)
+				return nil, fmt.Errorf("failed to set tags: %w", err)
 			}
 		}
 
@@ -80,7 +89,7 @@ func (fp *FilePuller) Pull(ctx context.Context, opts ...store.PullOption) error 
 		fp.progressCh <- struct{}{}
 	}
 
-	return nil
+	return desc, nil
 }
 
 func (fp *FilePuller) Progress() <-chan struct{} {

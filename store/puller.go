@@ -22,18 +22,24 @@ import (
 
 const DefaultSampleSize = 5
 
+type PullDescription struct {
+	FileCount int
+}
+
 // Puller is an interface that defines the behavior of pulling a slice of
 // documents from a remote host.
 type Puller interface {
 	// Pull will retrieve a slice of documents from a remote host.
-	Pull(ctx context.Context, b DocumentBuffer, opts ...PullOption) (int, error)
+	Pull(ctx context.Context, b DocumentBuffer, opts ...PullOption) (*PullDescription, error)
 }
 
 // PullOptions is a type for setting options for the pull operation.
 type PullOptions struct {
-	SampleSize int    // The number of documents to pull.
-	Filter     string // Filter string
-	SealOpener dcrypto.SealOpener
+	SampleSize   int    // The number of documents to pull.
+	Filter       string // Filter string
+	SealOpener   dcrypto.SealOpener
+	DescribeOnly bool
+	Workers      int
 }
 
 type PullOption func(*PullOptions)
@@ -53,5 +59,19 @@ func WithPullFilter(filter string) PullOption {
 func WithPullSealOpener(so dcrypto.SealOpener) PullOption {
 	return func(o *PullOptions) {
 		o.SealOpener = so
+	}
+}
+
+// WithPullDescribe will only describe the pull operation and not actually pull
+// the documents.
+func WithPullDescribe() PullOption {
+	return func(o *PullOptions) {
+		o.DescribeOnly = true
+	}
+}
+
+func WithWorkers(workers int) PullOption {
+	return func(o *PullOptions) {
+		o.Workers = workers
 	}
 }

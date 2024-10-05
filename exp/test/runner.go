@@ -230,7 +230,7 @@ func runPullOperation(t *testing.T, client *TestStore, op operation) {
 
 	fp := diskhop.NewFilePuller(client.Puller)
 
-	err := fp.Pull(context.Background(), options...)
+	_, err := fp.Pull(context.Background(), options...)
 	require.NoError(t, err, "failed to pull file")
 }
 

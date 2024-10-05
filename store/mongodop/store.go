@@ -36,6 +36,7 @@ const (
 	DefaultBucketName         = "diskhop"
 	DefaultDBName             = "diskhop"
 	DefaultNameCollectionName = "name"
+	defaultWorkers            = 1
 )
 
 // Store is a MongoDB database for pushing and pulling data from local disk.
@@ -184,6 +185,10 @@ func findFiles(
 		sampleSize = store.DefaultSampleSize
 	}
 
+	if opts.DescribeOnly {
+		sampleSize = len(gfiles)
+	}
+
 	chosen, err := randomSubset(gfiles, sampleSize)
 	// Select a random sample of files.
 	if err != nil {
@@ -199,7 +204,7 @@ func (s *Store) Close(ctx context.Context) error {
 }
 
 // Pull will retrieve a slice of documents from a remote host.
-func (s *Store) Pull(ctx context.Context, buf store.DocumentBuffer, setters ...store.PullOption) (int, error) {
+func (s *Store) Pull(ctx context.Context, buf store.DocumentBuffer, setters ...store.PullOption) (*store.PullDescription, error) {
 	opts := store.PullOptions{}
 	for _, fn := range setters {
 		fn(&opts)
@@ -211,7 +216,66 @@ func (s *Store) Pull(ctx context.Context, buf store.DocumentBuffer, setters ...s
 
 	panic("not implemented")
 
-	return 0, nil
+	return nil, nil
+}
+
+type errorDocument struct {
+	doc store.Document
+	err error
+}
+
+func encryptedPullWorker(
+	ctx context.Context,
+	s *Store,
+	files <-chan gridfs.File,
+	results chan<- errorDocument,
+	opts store.PullOptions,
+) {
+	for file := range files {
+		stream, err := s.bucket.OpenDownloadStream(file.ID)
+		if err != nil {
+			results <- errorDocument{err: fmt.Errorf("failed to open download stream: %w", err)}
+
+			return
+		}
+
+		actualName, ok := s.nameIndex.hexName.get(file.Name)
+		if !ok {
+			results <- errorDocument{err: fmt.Errorf("ID not found for file name %s", file.Name)}
+
+			return
+		}
+
+		_, gfsMeta, ok := s.nameIndex.nameDoc.get(actualName)
+		if !ok {
+			s.nameIndex.nameDoc.add(actualName, &file, newGridFSMetadata(nil))
+		}
+
+		doc := &store.Document{
+			Filename: actualName,
+			Metadata: gfsMeta.Diskhop,
+		}
+
+		data := make([]byte, file.Length)
+		if _, err := io.ReadFull(stream, data); err != nil {
+			results <- errorDocument{err: fmt.Errorf("failed to read from stream: %w", err)}
+
+			return
+		}
+
+		// Decrypt the data.
+		decData, err := opts.SealOpener.Open(ctx, data)
+		if err != nil {
+			results <- errorDocument{err: fmt.Errorf("failed to decrypt data: %w", err)}
+
+			return
+		}
+
+		doc.Data = decData
+
+		results <- errorDocument{doc: *doc}
+	}
+
 }
 
 // PullEnc will retrieve a slice of encrypted documents from a remote host.
@@ -219,73 +283,65 @@ func (s *Store) EncryptedPull(
 	ctx context.Context,
 	buf store.DocumentBuffer,
 	setters ...store.PullOption,
-) (int, error) {
+) (*store.PullDescription, error) {
 	opts := store.PullOptions{}
 	for _, fn := range setters {
 		fn(&opts)
 	}
 
 	if err := loadNameIndex(ctx, s.nameIndex, opts.SealOpener); err != nil {
-		return 0, fmt.Errorf("failed to load name index: %w", err)
+		return nil, fmt.Errorf("failed to load name index: %w", err)
 	}
 
 	files, err := findFiles(ctx, s.nameIndex, s.bucket, opts)
 	if err != nil {
-		return 0, fmt.Errorf("failed to find files: %w", err)
+		return nil, fmt.Errorf("failed to find files: %w", err)
 	}
 
 	count := len(files)
 
 	go func() {
-		for _, f := range files {
-			stream, err := s.bucket.OpenDownloadStream(f.ID)
-			if err != nil {
-				buf.Send(nil, fmt.Errorf("failed to open download stream: %w", err))
+		if opts.DescribeOnly {
+			return
+		}
 
-				return
+		filesCh := make(chan gridfs.File, count)
+		results := make(chan errorDocument, count)
+
+		workerCount := opts.Workers
+		if workerCount == 0 {
+			workerCount = defaultWorkers
+		}
+
+		for w := 0; w < workerCount; w++ {
+			go encryptedPullWorker(ctx, s, filesCh, results, opts)
+		}
+
+		for i := 0; i < count; i++ {
+			filesCh <- files[i]
+			close(filesCh)
+		}
+
+		for a := 0; a < count; a++ {
+			errDoc := <-results
+
+			if errDoc.err != nil {
+				buf.Send(nil, errDoc.err)
+
+				continue
 			}
 
-			actualName, ok := s.nameIndex.hexName.get(f.Name)
-			if !ok {
-				buf.Send(nil, fmt.Errorf("ID not found for file name %s", f.Name))
-
-				return
-			}
-
-			_, gfsMeta, ok := s.nameIndex.nameDoc.get(actualName)
-			if !ok {
-				s.nameIndex.nameDoc.add(actualName, &f, newGridFSMetadata(nil))
-			}
-
-			doc := &store.Document{
-				Filename: actualName,
-				Metadata: gfsMeta.Diskhop,
-			}
-
-			data := make([]byte, f.Length)
-			if _, err := io.ReadFull(stream, data); err != nil {
-				buf.Send(nil, fmt.Errorf("failed to read from stream: %w", err))
-
-				return
-			}
-
-			// Decrypt the data.
-			decData, err := opts.SealOpener.Open(ctx, data)
-			if err != nil {
-				buf.Send(nil, fmt.Errorf("failed to decrypt data: %w", err))
-				return
-			}
-
-			doc.Data = decData
-
-			// Send the document to the buffer
-			buf.Send(doc, nil)
+			buf.Send(&errDoc.doc, nil)
 		}
 
 		buf.Send(nil, io.EOF)
 	}()
 
-	return count, nil
+	desc := &store.PullDescription{
+		FileCount: count,
+	}
+
+	return desc, nil
 }
 
 func (s *Store) AddCommit(_ context.Context, commit *store.Commit) {
