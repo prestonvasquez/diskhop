@@ -23,7 +23,7 @@ import (
 const DefaultSampleSize = 5
 
 type PullDescription struct {
-	FileCount int
+	Count int
 }
 
 // Puller is an interface that defines the behavior of pulling a slice of
@@ -40,6 +40,7 @@ type PullOptions struct {
 	SealOpener   dcrypto.SealOpener
 	DescribeOnly bool
 	Workers      int
+	MaskName     bool // Use a UUID as a mask name
 }
 
 type PullOption func(*PullOptions)
@@ -73,5 +74,11 @@ func WithPullDescribe() PullOption {
 func WithWorkers(workers int) PullOption {
 	return func(o *PullOptions) {
 		o.Workers = workers
+	}
+}
+
+func WithMaskName() PullOption {
+	return func(o *PullOptions) {
+		o.MaskName = true
 	}
 }

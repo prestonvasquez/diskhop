@@ -15,13 +15,12 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
-
-	"crypto/aes"
-	"crypto/cipher"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/prestonvasquez/diskhop"
@@ -137,10 +136,8 @@ func runPull(cmd *cobra.Command, _ []string, opts store.PullOptions) error {
 
 	<-trackerDone
 
-	fmt.Println(desc)
-
 	description := [][]string{
-		[]string{strconv.Itoa(desc.FileCount)},
+		{strconv.Itoa(desc.Count)},
 	}
 
 	// Create a new tablewriter instance with os.Stdout as output
@@ -173,6 +170,7 @@ func newPullCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&flags.Filter, "filter", "f", "", "filter documents by expression")
 	cmd.Flags().BoolVarP(&flags.DescribeOnly, "describe", "d", false, "describe the query without actually pulling data")
 	cmd.Flags().IntVarP(&flags.Workers, "workers", "w", 1, "number of workers to use")
+	cmd.Flags().BoolVarP(&flags.MaskName, "mask", "m", false, "mask the file name")
 
 	cmd.Run = func(cmd *cobra.Command, args []string) {
 		if err := runPull(cmd, args, flags); err != nil {

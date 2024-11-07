@@ -15,6 +15,8 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"fmt"
 	"log"
 	"os"
@@ -25,9 +27,6 @@ import (
 	"github.com/prestonvasquez/diskhop/store"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
-
-	"crypto/aes"
-	"crypto/cipher"
 )
 
 // Check if the argument is "origin"

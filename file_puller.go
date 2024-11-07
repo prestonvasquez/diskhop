@@ -58,8 +58,8 @@ func (fp *FilePuller) Pull(ctx context.Context, opts ...store.PullOption) (*stor
 		return desc, nil
 	}
 
-	fp.totalCh <- desc.FileCount
-	fp.progressCh = make(chan struct{}, desc.FileCount)
+	fp.totalCh <- desc.Count
+	fp.progressCh = make(chan struct{}, desc.Count)
 
 	defer close(fp.totalCh)
 	defer close(fp.progressCh)

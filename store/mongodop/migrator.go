@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 
 	"github.com/prestonvasquez/diskhop/store"
 	"go.mongodb.org/mongo-driver/bson"
@@ -87,6 +88,45 @@ func ConnectMigrator(ctx context.Context, connStr string, db, srcB, targB string
 	return pusher, nil
 }
 
+func migrateByFileID(up *Migrator, id interface{}) error {
+	// If nothing has changed, then we use an aggregation pipeline to
+	// move the data from the source to the target.
+	pipeline := mongo.Pipeline{
+		// Match the document
+		bson.D{{"$match", bson.D{{"_id", id}}}},
+		// Add the document to the target collection
+		bson.D{{"$merge", bson.D{{"into", up.targetBucketName + "." + "files"}, {"whenMatched", "merge"}}}},
+	}
+
+	// Merge File into the target
+	srcFileColl := up.client.Database(up.database).Collection(up.srcBucketName + "." + "files")
+
+	_, err := srcFileColl.Aggregate(context.TODO(), pipeline)
+	if err != nil {
+		log.Fatal("Error moving file:", err)
+	}
+
+	// Merge chunks into the target
+	//
+	// Define the aggregation pipeline to move chunks
+	chunksPipeline := mongo.Pipeline{
+		// Match the chunks for the given file ID
+		bson.D{{"$match", bson.D{{"files_id", id}}}},
+		// Merge the chunks into the target collection
+		bson.D{{"$merge", bson.D{{"into", up.targetBucketName + "." + "chunks"}, {"whenMatched", "merge"}}}},
+	}
+
+	srcChunksColl := up.client.Database(up.database).Collection(up.srcBucketName + "." + "chunks")
+
+	// Execute the aggregation pipeline for the chunks
+	_, err = srcChunksColl.Aggregate(context.TODO(), chunksPipeline)
+	if err != nil {
+		return fmt.Errorf("Error moving chunks:", err)
+	}
+
+	return nil
+}
+
 // PushEnc migrates the file with the given name from the source bucket to the
 // target bucket.
 func (up *Migrator) Push(
@@ -104,48 +144,48 @@ func (up *Migrator) Push(
 		return "", fmt.Errorf("failed to load name index: %w", err)
 	}
 
+	// Merge filtered data.
+	if mergedOpts.Filter != "" {
+		// Get the ids for the name.
+		pullOpts := store.PullOptions{
+			SampleSize: math.MaxInt,
+			Filter:     mergedOpts.Filter,
+		}
+
+		files, err := findFiles(ctx, &up.nameIndex, up.srcBucket, pullOpts)
+		if err != nil {
+			return "", fmt.Errorf("failed to find files: %w", err)
+		}
+
+		ids := make([]interface{}, len(files))
+		for i, f := range files {
+			ids[i] = f.ID
+		}
+
+		for _, id := range ids {
+			// TODO: Can this be variadic? I.e. pass a slice of ids rather than a
+			// single id at a time?
+			if err := migrateByFileID(up, id); err != nil {
+				return "", fmt.Errorf("failed to migrate by file ID: %w", err)
+			}
+		}
+
+		// Return nothing because there are probably a bunch of IDs.
+		return "", nil
+	}
+
 	// Get the file id for the name.
 	doc, meta, ok := up.nameIndex.nameDoc.get(name)
-	if !ok {
+	if !ok && mergedOpts.Filter == "" {
 		return "", fmt.Errorf("file not found: %s", name)
 	}
 
 	changed, err := dataChanged(ctx, &up.nameIndex, name, r, mergedOpts)
+
+	// Merge file ID.
 	if !changed && err == nil {
-		fileID := doc.ID
-		// If nothing has changed, then we use an aggregation pipeline to
-		// move the data from the source to the target.
-		pipeline := mongo.Pipeline{
-			// Match the document
-			bson.D{{"$match", bson.D{{"_id", fileID}}}},
-			// Add the document to the target collection
-			bson.D{{"$merge", bson.D{{"into", up.targetBucketName + "." + "files"}, {"whenMatched", "merge"}}}},
-		}
-
-		// Merge File into the target
-		srcFileColl := up.client.Database(up.database).Collection(up.srcBucketName + "." + "files")
-
-		_, err = srcFileColl.Aggregate(context.TODO(), pipeline)
-		if err != nil {
-			log.Fatal("Error moving file:", err)
-		}
-
-		// Merge chunks into the target
-		//
-		// Define the aggregation pipeline to move chunks
-		chunksPipeline := mongo.Pipeline{
-			// Match the chunks for the given file ID
-			bson.D{{"$match", bson.D{{"files_id", fileID}}}},
-			// Merge the chunks into the target collection
-			bson.D{{"$merge", bson.D{{"into", up.targetBucketName + "." + "chunks"}, {"whenMatched", "merge"}}}},
-		}
-
-		srcChunksColl := up.client.Database(up.database).Collection(up.srcBucketName + "." + "chunks")
-
-		// Execute the aggregation pipeline for the chunks
-		_, err = srcChunksColl.Aggregate(context.TODO(), chunksPipeline)
-		if err != nil {
-			log.Fatal("Error moving chunks:", err)
+		if err := migrateByFileID(up, doc.ID); err != nil {
+			return "", err
 		}
 	} else {
 

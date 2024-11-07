@@ -169,7 +169,6 @@ func TestFilterDocuments(t *testing.T) {
 			}
 
 			assert.ElementsMatch(t, tc.expected, result)
-
 		})
 	}
 }

@@ -108,7 +108,7 @@ func createTmpDir(t *testing.T) (string, func()) {
 	assert.NoError(t, err, "failed to remove temporary directory")
 
 	// Remake the tmp directory
-	err = os.Mkdir(dir, 0755)
+	err = os.Mkdir(dir, 0o755)
 	assert.NoError(t, err, "failed to make temporary directory")
 
 	return dir, func() { os.RemoveAll(dir) }
@@ -280,6 +280,7 @@ func runRevertOperation(t *testing.T, client *TestStore, op operation) {
 type migrationArgs struct {
 	fileName string
 	tags     []string
+	filter   string
 }
 
 func newMigrationArgs(t *testing.T, args []map[string]any) migrationArgs {
@@ -299,6 +300,8 @@ func newMigrationArgs(t *testing.T, args []map[string]any) migrationArgs {
 			for _, tag := range value.([]any) {
 				migrationArgs.tags = append(migrationArgs.tags, tag.(string))
 			}
+		case "filter":
+			migrationArgs.filter = value.(string)
 		}
 	}
 
@@ -340,11 +343,24 @@ func runMigrateOperation(t *testing.T, test T, op operation, dir string) {
 		opts = append(opts, store.WithPushTags(args.tags...))
 	}
 
-	// Open the file to be migrated.
-	file, err := os.Open(filepath.Join(dir, args.fileName))
-	require.NoError(t, err, "failed to open file")
+	if args.filter != "" {
+		opts = append(opts, store.WithPushFilter(args.filter))
+	}
 
-	_, err = client.Pusher.Push(context.Background(), file.Name(), file, opts...)
+	var file *os.File
+	var fileName string
+
+	// Open the file to be migrated.
+	if args.fileName != "" {
+		var err error
+
+		file, err := os.Open(filepath.Join(dir, args.fileName))
+		require.NoError(t, err, "failed to open file")
+
+		fileName = file.Name()
+	}
+
+	_, err := client.Pusher.Push(context.Background(), fileName, file, opts...)
 	require.NoError(t, err, "failed to migrate file")
 
 	dirL, err := os.Open(dir)

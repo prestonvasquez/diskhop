@@ -27,8 +27,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
 )
 
-const tagKey = "tags"
-const metadataKey = "diskhop"
+const (
+	tagKey      = "tags"
+	metadataKey = "diskhop"
+)
 
 // hexName keeps a map of string hex to the decrypted file name.
 type hexName struct {

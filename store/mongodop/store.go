@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/google/uuid"
 	"github.com/prestonvasquez/diskhop/exp/dcrypto"
 	"github.com/prestonvasquez/diskhop/internal/filter"
 	"github.com/prestonvasquez/diskhop/store"
@@ -49,6 +50,7 @@ type Store struct {
 	ivPusher    *IVPusher
 	nameIndex   *nameIndex
 	commits     []*store.Commit
+	client      *mongo.Client
 }
 
 var (
@@ -99,6 +101,7 @@ func Connect(ctx context.Context, connStr, db, bucketName string) (*Store, error
 		commitsColl: commitsColl,
 		ivPusher:    ivPusher,
 		nameIndex:   nameIndex,
+		client:      client,
 	}
 
 	return mongoStore, nil
@@ -200,6 +203,10 @@ func findFiles(
 
 // Close will flush the nameIndex.
 func (s *Store) Close(ctx context.Context) error {
+	if err := s.client.Disconnect(ctx); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -232,13 +239,6 @@ func encryptedPullWorker(
 	opts store.PullOptions,
 ) {
 	for file := range files {
-		stream, err := s.bucket.OpenDownloadStream(file.ID)
-		if err != nil {
-			results <- errorDocument{err: fmt.Errorf("failed to open download stream: %w", err)}
-
-			return
-		}
-
 		actualName, ok := s.nameIndex.hexName.get(file.Name)
 		if !ok {
 			results <- errorDocument{err: fmt.Errorf("ID not found for file name %s", file.Name)}
@@ -251,9 +251,21 @@ func encryptedPullWorker(
 			s.nameIndex.nameDoc.add(actualName, &file, newGridFSMetadata(nil))
 		}
 
+		docName := actualName
+		if opts.MaskName {
+			docName = uuid.New().String()
+		}
+
 		doc := &store.Document{
-			Filename: actualName,
+			Filename: docName,
 			Metadata: gfsMeta.Diskhop,
+		}
+
+		stream, err := s.bucket.OpenDownloadStream(file.ID)
+		if err != nil {
+			results <- errorDocument{err: fmt.Errorf("failed to open download stream: %w", err)}
+
+			return
 		}
 
 		data := make([]byte, file.Length)
@@ -275,7 +287,6 @@ func encryptedPullWorker(
 
 		results <- errorDocument{doc: *doc}
 	}
-
 }
 
 // PullEnc will retrieve a slice of encrypted documents from a remote host.
@@ -300,6 +311,8 @@ func (s *Store) EncryptedPull(
 
 	count := len(files)
 
+	desc := &store.PullDescription{Count: count}
+
 	go func() {
 		if opts.DescribeOnly {
 			return
@@ -319,12 +332,11 @@ func (s *Store) EncryptedPull(
 
 		for i := 0; i < count; i++ {
 			filesCh <- files[i]
-			close(filesCh)
 		}
+		close(filesCh)
 
 		for a := 0; a < count; a++ {
 			errDoc := <-results
-
 			if errDoc.err != nil {
 				buf.Send(nil, errDoc.err)
 
@@ -336,10 +348,6 @@ func (s *Store) EncryptedPull(
 
 		buf.Send(nil, io.EOF)
 	}()
-
-	desc := &store.PullDescription{
-		FileCount: count,
-	}
 
 	return desc, nil
 }

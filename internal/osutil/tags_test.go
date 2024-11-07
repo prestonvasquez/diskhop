@@ -90,5 +90,4 @@ func TestSetTags(t *testing.T) {
 			assert.ElementsMatch(t, tt.tags, got)
 		})
 	}
-
 }

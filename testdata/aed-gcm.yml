@@ -296,6 +296,46 @@ cases:
         data: "hello world A!"
         tags: ["tag1", "tag2"]
 
+  - name: "migrate with name filter"
+    operations:
+      - action: "push"
+        bucket: "bucketOne"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1"]
+      - action: "migrate"
+        migrationSrc: "bucketOne"
+        migrationTarget: "bucketTwo"
+        args: 
+          - filter: "n=~'file1'"
+      - action: "pull"
+        bucket: "bucketTwo"
+    want:
+      - name: "file1.txt"
+        data: "hello world A!"
+        tags: ["tag1"]
+
+  - name: "migrate with tag filter"
+    operations:
+      - action: "push"
+        bucket: "bucketOne"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1"]
+      - action: "migrate"
+        migrationSrc: "bucketOne"
+        migrationTarget: "bucketTwo"
+        args: 
+          - filter: "t('tag1')"
+      - action: "pull"
+        bucket: "bucketTwo"
+    want:
+      - name: "file1.txt"
+        data: "hello world A!"
+        tags: ["tag1"]
+
   - name: "migrate no change"
     operations:
       - action: "push"

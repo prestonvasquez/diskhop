@@ -32,6 +32,7 @@ type PushOption func(*PushOptions)
 type PushOptions struct {
 	Tags       []string // Metadata tags to associate with the object.
 	SealOpener dcrypto.SealOpener
+	Filter     string // Filter string
 }
 
 // WithPushTags sets the tags for the object.
@@ -45,5 +46,13 @@ func WithPushTags(tags ...string) PushOption {
 func WithPushSealOpener(so dcrypto.SealOpener) PushOption {
 	return func(o *PushOptions) {
 		o.SealOpener = so
+	}
+}
+
+// WithPushFilter will allow the user to set a filter for the push operation,
+// specifically to avoid downloading chunk data for migration.
+func WithPushFilter(filter string) PushOption {
+	return func(o *PushOptions) {
+		o.Filter = filter
 	}
 }

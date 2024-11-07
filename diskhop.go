@@ -47,7 +47,7 @@ func flushCommits(ctx context.Context, commiter store.Commiter) error {
 
 func secureDelete(filename string) error {
 	// Open the file for reading and writing
-	file, err := os.OpenFile(filename, os.O_RDWR, 0600)
+	file, err := os.OpenFile(filename, os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open file: %w", err)
 	}
