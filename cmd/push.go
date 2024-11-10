@@ -56,7 +56,7 @@ func extractName(arg string) (string, error) {
 	return "", fmt.Errorf("invalid format: %s. Must be 'migrate/{name}'", arg)
 }
 
-func runPush(cmd *cobra.Command, args []string) error {
+func runPush(cmd *cobra.Command, args []string, opts store.PushOptions) error {
 	curDir, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
@@ -89,6 +89,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to create diskhop store: %w", err)
 		}
 	} else {
+		fmt.Println("migrate")
 		diskhopStore, err = newDiskhopStoreUpstream(cmd.Context(), args[0], cfg)
 		if err != nil {
 			return fmt.Errorf("failed to create diskhop store: %w", err)
@@ -121,7 +122,11 @@ func runPush(cmd *cobra.Command, args []string) error {
 			BarEnd:        "]",
 		}))
 
-	opts := []store.PushOption{}
+	pushOpts := []store.PushOption{
+		func(o *store.PushOptions) {
+			*o = opts
+		},
+	}
 
 	if key != nil {
 		block, err := aes.NewCipher(key)
@@ -136,10 +141,10 @@ func runPush(cmd *cobra.Command, args []string) error {
 
 		so := dcrypto.NewAEAD(diskhopStore.ivMgr, aesgcm)
 
-		opts = append(opts, store.WithPushSealOpener(so))
+		pushOpts = append(pushOpts, store.WithPushSealOpener(so))
 	}
 
-	if err := dopPusher.Push(cmd.Context(), f, opts...); err != nil {
+	if err := dopPusher.Push(cmd.Context(), f, pushOpts...); err != nil {
 		return fmt.Errorf("failed to push: %w", err)
 	}
 
@@ -160,8 +165,12 @@ func newPushCommand() *cobra.Command {
 		Long: "upsert the files from the local diskhop directory to remote host",
 	}
 
+	flags := store.PushOptions{}
+
+	cmd.Flags().StringVarP(&flags.Filter, "filter", "f", "", "filter documents by expression")
+
 	cmd.Run = func(cmd *cobra.Command, args []string) {
-		if err := runPush(cmd, args); err != nil {
+		if err := runPush(cmd, args, flags); err != nil {
 			log.Fatalf("failed to push: %v", err)
 		}
 	}

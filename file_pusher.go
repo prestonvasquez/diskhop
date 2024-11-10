@@ -74,6 +74,28 @@ func (fp *FilePusher) PushFromInfo(ctx context.Context, fi os.FileInfo, opts ...
 
 // Push will push the files in the directory to the store.
 func (fp *FilePusher) Push(ctx context.Context, f *os.File, opts ...store.PushOption) error {
+	// If there is a filter, then this is a migration.
+	hasFilter := false
+
+	mergedOpts := store.PushOptions{}
+	for _, opt := range opts {
+		opt(&mergedOpts)
+		if mergedOpts.Filter != "" {
+			hasFilter = true
+
+			break
+		}
+	}
+
+	if hasFilter {
+		_, err := fp.p.Push(ctx, "", nil, opts...)
+		if err != nil {
+			return fmt.Errorf("failed to migrate: %w", err)
+		}
+
+		return nil
+	}
+
 	commiter, ok := fp.p.(store.Commiter)
 	if ok {
 		defer flushCommits(ctx, commiter)

@@ -1,5 +1,5 @@
-// Copyright 2024 Preston Vasquez
 //
+// Copyright 2024 Preston Vasquez
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -157,6 +157,8 @@ func (up *Migrator) Push(
 			return "", fmt.Errorf("failed to find files: %w", err)
 		}
 
+		fmt.Println("files: ", len(files))
+
 		ids := make([]interface{}, len(files))
 		for i, f := range files {
 			ids[i] = f.ID
@@ -167,6 +169,12 @@ func (up *Migrator) Push(
 			// single id at a time?
 			if err := migrateByFileID(up, id); err != nil {
 				return "", fmt.Errorf("failed to migrate by file ID: %w", err)
+			}
+
+			// Delete the file from source database.
+			err = up.srcBucket.Delete(id)
+			if err != nil {
+				return "", fmt.Errorf("failed to delete file from source bucket: %w", err)
 			}
 		}
 
