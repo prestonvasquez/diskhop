@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/prestonvasquez/diskhop/exp/dcrypto"
@@ -197,6 +198,13 @@ func findFiles(
 	if err != nil {
 		return nil, fmt.Errorf("failed to select random subset of files: %w", err)
 	}
+
+	// Sort the chosen files from smallest to largest to ensure that the maximum
+	// number of files are downloaded in parallel, in the case that the download
+	// stream is canceled prematurely.
+	sort.Slice(chosen, func(i, j int) bool {
+		return chosen[i].Length < chosen[j].Length
+	})
 
 	return chosen, nil
 }
