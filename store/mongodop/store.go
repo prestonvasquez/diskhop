@@ -31,6 +31,8 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/gridfs"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
 const (
@@ -65,7 +67,13 @@ var (
 
 // Connect will establish a connection to a MongoDB database.
 func Connect(ctx context.Context, connStr, db, bucketName string) (*Store, error) {
-	opts := options.Client().ApplyURI(connStr)
+	wc := writeconcern.New(writeconcern.W(1)) // primary
+	rp := readpref.Primary()                  // explicit primary-only reads
+
+	opts := options.Client().
+		ApplyURI(connStr).
+		SetWriteConcern(wc).
+		SetReadPreference(rp)
 
 	client, err := mongo.Connect(ctx, opts)
 	if err != nil {
@@ -189,7 +197,7 @@ func findFiles(
 		sampleSize = store.DefaultSampleSize
 	}
 
-	if opts.DescribeOnly {
+	if opts.DescribeOnly || opts.DescribeFilesOnly {
 		sampleSize = len(gfiles)
 	}
 
@@ -319,10 +327,22 @@ func (s *Store) EncryptedPull(
 
 	count := len(files)
 
-	desc := &store.PullDescription{Count: count}
+	var size int64
+	fileDescriptions := make([]store.FileDescription, 0, count)
+
+	hexName := s.nameIndex.hexName
+	for _, f := range files {
+		size += f.Length
+
+		actualName, ok := hexName.get(f.Name)
+		if ok {
+			fileDescriptions = append(fileDescriptions, store.FileDescription{Name: actualName, Size: f.Length})
+		}
+	}
+	desc := &store.PullDescription{Count: count, Size: size, FileDescriptions: fileDescriptions}
 
 	go func() {
-		if opts.DescribeOnly {
+		if opts.DescribeOnly || opts.DescribeFilesOnly {
 			return
 		}
 
