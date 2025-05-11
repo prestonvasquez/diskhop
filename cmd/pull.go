@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/olekukonko/tablewriter"
@@ -84,7 +85,7 @@ func runPull(cmd *cobra.Command, _ []string, opts store.PullOptions) error {
 	go func() {
 		defer close(trackerDone)
 
-		if opts.DescribeOnly {
+		if opts.DescribeOnly || opts.DescribeFilesOnly {
 			return
 		}
 
@@ -137,12 +138,12 @@ func runPull(cmd *cobra.Command, _ []string, opts store.PullOptions) error {
 	<-trackerDone
 
 	description := [][]string{
-		{strconv.Itoa(desc.Count)},
+		{strconv.Itoa(desc.Count), strconv.FormatInt(int64(float64(desc.Size)/1e9), 10)},
 	}
 
 	// Create a new tablewriter instance with os.Stdout as output
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"File Count"})
+	table.SetHeader([]string{"File Count", "Size(gb)"})
 
 	// Append data to the table
 	for _, v := range description {
@@ -151,6 +152,26 @@ func runPull(cmd *cobra.Command, _ []string, opts store.PullOptions) error {
 
 	// Render the table
 	table.Render() // Send output to stdout
+
+	if opts.DescribeFilesOnly {
+		fileDescriptions := make([][]string, 0, len(desc.FileDescriptions))
+		for _, v := range desc.FileDescriptions {
+			fileDescriptions = append(fileDescriptions, []string{filepath.Base(v.Name), strconv.FormatInt(int64(float64(v.Size)/1e6), 10)})
+		}
+
+		// Create a new tablewriter instance with os.Stdout as output
+		fileTable := tablewriter.NewWriter(os.Stdout)
+		fileTable.SetHeader([]string{"Name", "Size(mb)"})
+
+		// Append data to the table
+		for _, v := range fileDescriptions {
+			fileTable.Append(v)
+		}
+
+		// Render the table
+		fileTable.Render() // Send output to stdout
+
+	}
 
 	return nil
 }
@@ -169,6 +190,7 @@ func newPullCommand() *cobra.Command {
 	cmd.Flags().IntVar(&flags.SampleSize, "sample", defaultSampeSize, "chose a random subset of data")
 	cmd.Flags().StringVarP(&flags.Filter, "filter", "f", "", "filter documents by expression")
 	cmd.Flags().BoolVarP(&flags.DescribeOnly, "describe", "d", false, "describe the query without actually pulling data")
+	cmd.Flags().BoolVarP(&flags.DescribeFilesOnly, "describe-files", "n", false, "describe the files without actually pulling data")
 	cmd.Flags().IntVarP(&flags.Workers, "workers", "w", 1, "number of workers to use")
 	cmd.Flags().BoolVarP(&flags.MaskName, "mask", "m", false, "mask the file name")
 

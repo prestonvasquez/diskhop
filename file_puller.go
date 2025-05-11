@@ -54,7 +54,7 @@ func (fp *FilePuller) Pull(ctx context.Context, opts ...store.PullOption) (*stor
 		opt(&mergedOpts)
 	}
 
-	if mergedOpts.DescribeOnly {
+	if mergedOpts.DescribeOnly || mergedOpts.DescribeFilesOnly {
 		return desc, nil
 	}
 
