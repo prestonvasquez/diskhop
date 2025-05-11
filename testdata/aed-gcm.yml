@@ -374,3 +374,22 @@ cases:
       - name: "file1.txt"
         data: "hello world A!"
         tags: ["tag3"]
+
+  - name: "transient error retries"
+    operations:
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag1", "tag2"]
+      - action: "pull"
+      - action: "push"
+        args:
+          - name: "file1.txt"
+            data: "hello world A!"
+            tags: ["tag3"]
+      - action: "pull"
+    want:
+      - name: "file1.txt"
+        data: "hello world A!"
+        tags: ["tag3"]

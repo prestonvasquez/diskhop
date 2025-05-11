@@ -52,7 +52,7 @@ type Store struct {
 	ivPusher    *IVPusher
 	nameIndex   *nameIndex
 	commits     []*store.Commit
-	client      *mongo.Client
+	Client      *mongo.Client
 }
 
 var (
@@ -106,7 +106,7 @@ func Connect(ctx context.Context, connStr, dbName, bucketName string) (*Store, e
 		commitsColl: commitsColl,
 		ivPusher:    ivPusher,
 		nameIndex:   nameIndex,
-		client:      client,
+		Client:      client,
 	}
 
 	return mongoStore, nil
@@ -235,7 +235,7 @@ func findFiles(
 
 // Close will flush the nameIndex.
 func (s *Store) Close(ctx context.Context) error {
-	if err := s.client.Disconnect(ctx); err != nil {
+	if err := s.Client.Disconnect(ctx); err != nil {
 		return err
 	}
 

@@ -20,6 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"time"
 
 	"github.com/prestonvasquez/diskhop/store"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -33,6 +35,10 @@ type Pusher struct {
 }
 
 var _ store.Pusher = &Pusher{}
+
+var transientErrorCodes = []int{
+	133, // FailedToSatisfyReadPreference
+}
 
 //// Attempt a push upload 3 times if
 //const maxUploadRetries = 3
@@ -186,9 +192,41 @@ func (p *Pusher) pushEncrypted(
 		gridFSOpts.SetMetadata(encryptedMeta)
 	}
 
-	// Perform a full upload.
-	id, err := p.bucket.UploadFromStream(ctx, newObjectID.Hex(), bytes.NewReader(ciphertext), gridFSOpts)
-	if err != nil {
+	maxRetries := opts.RetryPolicy.MaxRetries
+	if maxRetries == 0 {
+		maxRetries = 1
+	}
+
+	var id bson.ObjectID
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			// rewind and back off
+			time.Sleep(1 * time.Second)
+		}
+
+		id, err = p.bucket.UploadFromStream(ctx, newObjectID.Hex(), bytes.NewReader(ciphertext), gridFSOpts)
+		if err == nil {
+			break
+		}
+
+		// check for Mongo transient codes
+		var srvErr mongo.ServerError
+		if errors.As(err, &srvErr) {
+			retryable := false
+			for _, code := range transientErrorCodes {
+				if srvErr.HasErrorCode(code) {
+					log.Printf("Transient error code %d encountered, retrying upload for %q\n", code, name)
+					retryable = attempt < maxRetries
+					break
+				}
+			}
+			if retryable {
+				continue
+			}
+		}
+
+		// non-transient or no retries left
 		return "", fmt.Errorf("failed to upload file: %w", err)
 	}
 

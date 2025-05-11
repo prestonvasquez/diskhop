@@ -20,11 +20,13 @@ import (
 	"net/url"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/prestonvasquez/diskhop/exp/test"
 	"github.com/prestonvasquez/diskhop/store/mongodop"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go/modules/mongodb"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -104,20 +106,72 @@ func newTestMigrator(t *testing.T, ctx context.Context, src, target string) *tes
 	}
 }
 
+//func setup(t *testing.T, ctx context.Context) {
+//	t.Helper()
+//
+//	const database = "test"
+//
+//	uri := os.Getenv("MONGODB_URI")
+//	if uri == "" {
+//		mongodbContainer, err := mongodb.Run(ctx, "mongo:7.0.8")
+//		require.NoError(t, err, "failed to start mongodb container")
+//
+//		host, err := mongodbContainer.Host(ctx)
+//		require.NoError(t, err, "failed to get mongodb host")
+//
+//		port, err := mongodbContainer.MappedPort(ctx, "27017/tcp")
+//		require.NoError(t, err, "failed to get mongodb port")
+//
+//		uri = (&url.URL{
+//			Scheme:   "mongodb",
+//			Host:     net.JoinHostPort(host, port.Port()),
+//			Path:     "/",
+//			RawQuery: "directConnection=true",
+//		}).String()
+//
+//		os.Setenv("MONGODB_URI", uri)
+//	}
+//
+//	clientOpts := options.Client().ApplyURI(uri)
+//
+//	// Drop the database before and after test.
+//	client, err := mongo.Connect(clientOpts)
+//	require.NoError(t, err, "failed to connect to mongodb")
+//
+//	defer func() { _ = client.Disconnect(context.Background()) }()
+//
+//	// Ping the server to ensure the connection is established.
+//	err = client.Ping(context.Background(), nil)
+//	require.NoError(t, err, "failed to ping mongodb")
+//
+//	err = client.Database(database).Drop(context.Background())
+//	require.NoError(t, err, "failed to drop database")
+//}
+//
+
 func setup(t *testing.T, ctx context.Context) {
 	t.Helper()
 
 	const database = "test"
-
 	uri := os.Getenv("MONGODB_URI")
+
 	if uri == "" {
-		mongodbContainer, err := mongodb.Run(ctx, "mongo:7.0.8")
+		// Start Mongo with test commands enabled
+		req := testcontainers.ContainerRequest{
+			Image:        "mongo:7.0.8",
+			ExposedPorts: []string{"27017/tcp"},
+			Cmd:          []string{"mongod", "--setParameter", "enableTestCommands=1"},
+			WaitingFor:   wait.ForListeningPort("27017/tcp").WithStartupTimeout(30 * time.Second),
+		}
+		mongoC, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+			ContainerRequest: req,
+			Started:          true,
+		})
 		require.NoError(t, err, "failed to start mongodb container")
 
-		host, err := mongodbContainer.Host(ctx)
+		host, err := mongoC.Host(ctx)
 		require.NoError(t, err, "failed to get mongodb host")
-
-		port, err := mongodbContainer.MappedPort(ctx, "27017/tcp")
+		port, err := mongoC.MappedPort(ctx, "27017/tcp")
 		require.NoError(t, err, "failed to get mongodb port")
 
 		uri = (&url.URL{
@@ -126,22 +180,16 @@ func setup(t *testing.T, ctx context.Context) {
 			Path:     "/",
 			RawQuery: "directConnection=true",
 		}).String()
-
 		os.Setenv("MONGODB_URI", uri)
 	}
 
 	clientOpts := options.Client().ApplyURI(uri)
 
-	// Drop the database before and after test.
+	// Connect, ping, and drop the test database
 	client, err := mongo.Connect(clientOpts)
 	require.NoError(t, err, "failed to connect to mongodb")
-
 	defer func() { _ = client.Disconnect(context.Background()) }()
 
-	// Ping the server to ensure the connection is established.
-	err = client.Ping(context.Background(), nil)
-	require.NoError(t, err, "failed to ping mongodb")
-
-	err = client.Database(database).Drop(context.Background())
-	require.NoError(t, err, "failed to drop database")
+	require.NoError(t, client.Ping(context.Background(), nil), "failed to ping mongodb")
+	require.NoError(t, client.Database(database).Drop(context.Background()), "failed to drop database")
 }

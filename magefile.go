@@ -77,7 +77,7 @@ func Build() error {
 	}
 
 	// Build the Go binary with specific tags and output it as "diskhop-beta"
-	cmd := exec.Command("go", "build", "-tags=cse", "-o", "diskhop-beta", ".")
+	cmd := exec.Command("go", "build", "-o", "diskhop-beta", ".")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 

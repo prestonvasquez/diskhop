@@ -72,20 +72,21 @@ type fileData struct {
 
 type filters struct{}
 
-type operation struct {
+type Operation struct {
 	Action          string
 	Args            []map[string]any
 	Cipher          string
 	Bucket          string
 	MigrationSrc    string `yaml:"migrationSrc"`
 	MigrationTarget string `yaml:"migrationTarget"`
+	WantErr         bool
 
-	sealerOpener dcrypto.SealOpener
+	SealerOpener dcrypto.SealOpener
 }
 
 type testCase struct {
 	Name       string
-	Operations []operation
+	Operations []Operation
 	Want       []fileData
 	Cipher     string
 }
@@ -97,7 +98,7 @@ type testMatrix struct {
 
 var key = make([]byte, 32)
 
-func createTmpDir(t *testing.T) (string, func()) {
+func CreateTmpDir(t *testing.T) (string, func()) {
 	// Get the working directory
 	wd, err := os.Getwd()
 	require.NoError(t, err, "failed to get working directory")
@@ -114,7 +115,7 @@ func createTmpDir(t *testing.T) (string, func()) {
 	return dir, func() { os.RemoveAll(dir) }
 }
 
-func newDCryptoAEAD(t *testing.T, mgr dcrypto.IVManagerGetter) *dcrypto.AEAD {
+func NewDCryptoAEAD(t *testing.T, mgr dcrypto.IVManagerGetter) *dcrypto.AEAD {
 	key, _ := hex.DecodeString("6368616e676520746869732070617373776f726420746f206120736563726574")
 
 	block, err := aes.NewCipher(key)
@@ -156,7 +157,7 @@ func newPushArgs(args map[string]any) pushArgs {
 	return pushArgs
 }
 
-func runPushOperation(t *testing.T, client *TestStore, op operation, dir string) {
+func RunPushOperation(t *testing.T, client *TestStore, op Operation, dir string) {
 	t.Helper()
 
 	// If there are no args, we should do a path-level push.
@@ -170,8 +171,8 @@ func runPushOperation(t *testing.T, client *TestStore, op operation, dir string)
 		defer f.Close()
 
 		pushOpts := []store.PushOption{}
-		if op.sealerOpener != nil {
-			pushOpts = append(pushOpts, store.WithPushSealOpener(op.sealerOpener))
+		if op.SealerOpener != nil {
+			pushOpts = append(pushOpts, store.WithPushSealOpener(op.SealerOpener))
 		}
 
 		err = fp.Push(context.Background(), f, pushOpts...)
@@ -185,8 +186,8 @@ func runPushOperation(t *testing.T, client *TestStore, op operation, dir string)
 		pushArgs := newPushArgs(args)
 
 		opts := []store.PushOption{}
-		if op.sealerOpener != nil {
-			opts = append(opts, store.WithPushSealOpener(op.sealerOpener))
+		if op.SealerOpener != nil {
+			opts = append(opts, store.WithPushSealOpener(op.SealerOpener))
 		}
 
 		opts = append(opts, store.WithPushTags(pushArgs.tags...))
@@ -194,7 +195,11 @@ func runPushOperation(t *testing.T, client *TestStore, op operation, dir string)
 		filepath := filepath.Join(dir, pushArgs.name)
 
 		fileID, err := client.Pusher.Push(context.Background(), filepath, pushArgs.data, opts...)
-		require.NoError(t, err) // TODO: add to case to allow for expected errors
+		if !op.WantErr {
+			require.NoError(t, err) // TODO: add to case to allow for expected errors
+		} else {
+			return // If we want an error there is nothing to commit.
+		}
 
 		// If a commiter is defined, then we should commit.
 		if client.Commiter != nil && pushArgs.sha != "" {
@@ -211,7 +216,7 @@ func runPushOperation(t *testing.T, client *TestStore, op operation, dir string)
 	}
 }
 
-func runPullOperation(t *testing.T, client *TestStore, op operation) {
+func runPullOperation(t *testing.T, client *TestStore, op Operation) {
 	t.Helper()
 
 	options := []store.PullOption{}
@@ -224,8 +229,8 @@ func runPullOperation(t *testing.T, client *TestStore, op operation) {
 		}
 	}
 
-	if op.sealerOpener != nil {
-		options = append(options, store.WithPullSealOpener(op.sealerOpener))
+	if op.SealerOpener != nil {
+		options = append(options, store.WithPullSealOpener(op.SealerOpener))
 	}
 
 	fp := diskhop.NewFilePuller(client.Puller)
@@ -262,7 +267,7 @@ func newRevertArgs(t *testing.T, args []map[string]any) revertArgs {
 	return revertArgs
 }
 
-func runRevertOperation(t *testing.T, client *TestStore, op operation) {
+func runRevertOperation(t *testing.T, client *TestStore, op Operation) {
 	t.Helper()
 
 	if client.Reverter == nil {
@@ -308,7 +313,7 @@ func newMigrationArgs(t *testing.T, args []map[string]any) migrationArgs {
 	return migrationArgs
 }
 
-func runMigrateOperation(t *testing.T, test T, op operation, dir string) {
+func runMigrateOperation(t *testing.T, test T, op Operation, dir string) {
 	t.Helper()
 
 	if test.NewTestMigrator == nil {
@@ -335,8 +340,8 @@ func runMigrateOperation(t *testing.T, test T, op operation, dir string) {
 
 	opts := []store.PushOption{}
 
-	if op.sealerOpener != nil {
-		opts = append(opts, store.WithPushSealOpener(op.sealerOpener))
+	if op.SealerOpener != nil {
+		opts = append(opts, store.WithPushSealOpener(op.SealerOpener))
 	}
 
 	if len(args.tags) > 0 {
@@ -395,7 +400,7 @@ func runTestCase(t *testing.T, test T, tc testCase) {
 	const defaultBucketName = "primaryTestBucket"
 
 	// Remove old tmp dir and create a new one.
-	dir, tmpTeardown := createTmpDir(t)
+	dir, tmpTeardown := CreateTmpDir(t)
 	defer tmpTeardown()
 
 	// Run the operations
@@ -419,7 +424,7 @@ func runTestCase(t *testing.T, test T, tc testCase) {
 		switch op.Cipher {
 
 		case "aes-gcm":
-			op.sealerOpener = newDCryptoAEAD(t, client.Mgr)
+			op.SealerOpener = NewDCryptoAEAD(t, client.Mgr)
 		case "":
 		default:
 			t.Fatalf("unknown cipher: %s", op.Cipher)
@@ -427,7 +432,7 @@ func runTestCase(t *testing.T, test T, tc testCase) {
 
 		switch op.Action {
 		case "push":
-			runPushOperation(t, client, op, dir)
+			RunPushOperation(t, client, op, dir)
 		case "pull":
 			runPullOperation(t, client, op)
 		case "revert":

@@ -30,9 +30,10 @@ type PushOption func(*PushOptions)
 
 // PushOptions defines the options for pushing an object.
 type PushOptions struct {
-	Tags       []string // Metadata tags to associate with the object.
-	SealOpener dcrypto.SealOpener
-	Filter     string // Filter string
+	Tags        []string // Metadata tags to associate with the object.
+	SealOpener  dcrypto.SealOpener
+	Filter      string // Filter string
+	RetryPolicy RetryPolicy
 }
 
 // WithPushTags sets the tags for the object.
@@ -54,5 +55,12 @@ func WithPushSealOpener(so dcrypto.SealOpener) PushOption {
 func WithPushFilter(filter string) PushOption {
 	return func(o *PushOptions) {
 		o.Filter = filter
+	}
+}
+
+// withPushRetryPolicy sets the retry policy for the push operation.
+func WithRetryPolicy(retryPolicy RetryPolicy) PushOption {
+	return func(o *PushOptions) {
+		o.RetryPolicy = retryPolicy
 	}
 }
