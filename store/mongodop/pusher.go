@@ -193,8 +193,6 @@ func (p *Pusher) pushEncrypted(
 		originalFile = &mongo.GridFSFile{}
 	}
 
-	fmt.Println(id)
-
 	p.nameIndex.nameDoc.add(name, &mongo.GridFSFile{ID: id, Name: newObjectID.Hex(), Length: int64(len(byts))}, meta)
 	p.nameIndex.hexName.add(newObjectID.Hex(), name)
 

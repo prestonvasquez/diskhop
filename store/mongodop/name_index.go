@@ -111,9 +111,18 @@ func loadNameDoc(ctx context.Context, opener dcrypto.Opener, coll *mongo.Collect
 	}
 
 	for cur.Next(ctx) {
-		file := mongo.GridFSFile{}
-		if err := cur.Decode(&file); err != nil {
+		uf := unmarshalFile{}
+		if err := cur.Decode(&uf); err != nil {
 			return nil, fmt.Errorf("failed to decode document: %w", err)
+		}
+
+		file := mongo.GridFSFile{
+			ID:         uf.ID,
+			Length:     uf.Length,
+			ChunkSize:  uf.ChunkSize,
+			UploadDate: uf.UploadDate,
+			Name:       uf.Name,
+			Metadata:   uf.Metadata,
 		}
 
 		fileName, ok := hexName.get(file.Name)

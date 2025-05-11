@@ -8,7 +8,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/prestonvasquez/diskhop v0.0.0-20240901011113-c18b707ee445
 	github.com/stretchr/testify v1.9.0
-	go.mongodb.org/mongo-driver v1.16.1
 	go.mongodb.org/mongo-driver/v2 v2.2.1
 )
 
@@ -18,7 +17,6 @@ require (
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/klauspost/compress v1.17.4 // indirect
 	github.com/kr/pretty v0.3.0 // indirect
-	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/pkg/xattr v0.4.10 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.8.1 // indirect

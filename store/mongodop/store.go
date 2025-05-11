@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/big"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/prestonvasquez/diskhop/exp/dcrypto"
@@ -127,6 +128,17 @@ func randomSubset(files []mongo.GridFSFile, size int) ([]mongo.GridFSFile, error
 	return chosen, nil
 }
 
+// unmarshalFile is a temporary type used to unmarshal documents from the files collection and can be transformed into
+// a File instance. This type exists to avoid adding BSON struct tags to the exported File type.
+type unmarshalFile struct {
+	ID         interface{} `bson:"_id"`
+	Length     int64       `bson:"length"`
+	ChunkSize  int32       `bson:"chunkSize"`
+	UploadDate time.Time   `bson:"uploadDate"`
+	Name       string      `bson:"filename"`
+	Metadata   bson.Raw    `bson:"metadata"`
+}
+
 func findFiles(
 	ctx context.Context,
 	nidx *nameIndex,
@@ -171,12 +183,19 @@ func findFiles(
 
 	gfiles := []mongo.GridFSFile{}
 	for cur.Next(ctx) {
-		f := mongo.GridFSFile{}
-		if err := cur.Decode(&f); err != nil {
+		uf := unmarshalFile{}
+		if err := cur.Decode(&uf); err != nil {
 			return nil, fmt.Errorf("failed to decode document: %w", err)
 		}
 
-		fmt.Println(f)
+		f := mongo.GridFSFile{
+			ID:         uf.ID,
+			Length:     uf.Length,
+			ChunkSize:  uf.ChunkSize,
+			UploadDate: uf.UploadDate,
+			Name:       uf.Name,
+			Metadata:   uf.Metadata,
+		}
 
 		gfiles = append(gfiles, f)
 	}
@@ -254,7 +273,6 @@ func encryptedPullWorker(
 		_, gfsMeta, ok := s.nameIndex.nameDoc.get(actualName)
 		if !ok {
 			s.nameIndex.nameDoc.add(actualName, &file, newGridFSMetadata(nil))
-			_, gfsMeta, _ = s.nameIndex.nameDoc.get(actualName)
 		}
 
 		docName := actualName
@@ -267,11 +285,8 @@ func encryptedPullWorker(
 			Metadata: gfsMeta.Diskhop,
 		}
 
-		fmt.Println(file.ID)
-
 		stream, err := s.bucket.OpenDownloadStream(ctx, file.ID)
 		if err != nil {
-			fmt.Println(1, err)
 			results <- errorDocument{err: fmt.Errorf("failed to open download stream: %w", err)}
 
 			return
@@ -279,7 +294,6 @@ func encryptedPullWorker(
 
 		data := make([]byte, file.Length)
 		if _, err := io.ReadFull(stream, data); err != nil {
-			fmt.Println(err)
 			results <- errorDocument{err: fmt.Errorf("failed to read from stream: %w", err)}
 
 			return
@@ -288,7 +302,6 @@ func encryptedPullWorker(
 		// Decrypt the data.
 		decData, err := opts.SealOpener.Open(ctx, data)
 		if err != nil {
-			fmt.Println(err)
 			results <- errorDocument{err: fmt.Errorf("failed to decrypt data: %w", err)}
 
 			return
@@ -323,8 +336,6 @@ func (s *Store) EncryptedPull(
 	count := len(files)
 
 	desc := &store.PullDescription{Count: count}
-
-	fmt.Println(files)
 
 	go func() {
 		if opts.DescribeOnly {
