@@ -20,8 +20,7 @@ import (
 
 	"github.com/prestonvasquez/diskhop/exp/dcrypto"
 	"github.com/prestonvasquez/diskhop/store"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type gridfsMetadata struct {
@@ -44,7 +43,7 @@ func decryptGridFSMetadata(ctx context.Context, opener dcrypto.Opener, raw bson.
 		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
 	}
 
-	diskhopMetadataBinary := doc[metadataKey].(primitive.Binary)
+	diskhopMetadataBinary := doc[metadataKey].(bson.Binary)
 
 	decDiskhopMetdataBsonRaw := bson.Raw(diskhopMetadataBinary.Data)
 	var err error
@@ -77,7 +76,7 @@ func encryptGridFSMetadata(
 		return nil, fmt.Errorf("failed to encrypt metadata: %w", err)
 	}
 
-	doc := bson.M{metadataKey: primitive.Binary{Data: encMetaBytes}}
+	doc := bson.M{metadataKey: bson.Binary{Data: encMetaBytes}}
 
 	docBytes, err := bson.Marshal(doc)
 	if err != nil {

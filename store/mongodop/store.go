@@ -26,11 +26,9 @@ import (
 	"github.com/prestonvasquez/diskhop/exp/dcrypto"
 	"github.com/prestonvasquez/diskhop/internal/filter"
 	"github.com/prestonvasquez/diskhop/store"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/gridfs"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const (
@@ -44,7 +42,7 @@ const (
 // Store is a MongoDB database for pushing and pulling data from local disk.
 type Store struct {
 	Pusher
-	bucket      *gridfs.Bucket
+	bucket      *mongo.GridFSBucket
 	bucketName  string
 	fileColl    *mongo.Collection
 	commitsColl *mongo.Collection
@@ -64,10 +62,10 @@ var (
 )
 
 // Connect will establish a connection to a MongoDB database.
-func Connect(ctx context.Context, connStr, db, bucketName string) (*Store, error) {
+func Connect(ctx context.Context, connStr, dbName, bucketName string) (*Store, error) {
 	opts := options.Client().ApplyURI(connStr)
 
-	client, err := mongo.Connect(ctx, opts)
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
@@ -77,18 +75,15 @@ func Connect(ctx context.Context, connStr, db, bucketName string) (*Store, error
 		return nil, fmt.Errorf("failed to ping MongoDB server: %w", err)
 	}
 
-	bucket, err := gridfs.NewBucket(
-		client.Database(db),
-		options.GridFSBucket().SetName(bucketName))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create bucket: %w", err)
-	}
+	db := client.Database(dbName)
 
-	ivPusher := &IVPusher{coll: client.Database(db).Collection("initvectors")}
+	bucket := db.GridFSBucket(options.GridFSBucket().SetName(bucketName))
 
-	fileColl := client.Database(db).Collection(bucketName + "." + "files")
-	nameColl := client.Database(db).Collection(DefaultNameCollectionName)
-	commitsColl := client.Database(db).Collection("commits")
+	ivPusher := &IVPusher{coll: db.Collection("initvectors")}
+
+	fileColl := db.Collection(bucketName + "." + "files")
+	nameColl := db.Collection(DefaultNameCollectionName)
+	commitsColl := db.Collection("commits")
 
 	nameIndex := &nameIndex{coll: fileColl, nameColl: nameColl}
 
@@ -108,12 +103,12 @@ func Connect(ctx context.Context, connStr, db, bucketName string) (*Store, error
 	return mongoStore, nil
 }
 
-func randomSubset(files []gridfs.File, size int) ([]gridfs.File, error) {
+func randomSubset(files []mongo.GridFSFile, size int) ([]mongo.GridFSFile, error) {
 	if size >= len(files) {
 		return files, nil
 	}
 
-	chosen := make([]gridfs.File, 0, size)
+	chosen := make([]mongo.GridFSFile, 0, size)
 	usedIndices := make(map[int]struct{})
 
 	for len(chosen) < size {
@@ -135,9 +130,9 @@ func randomSubset(files []gridfs.File, size int) ([]gridfs.File, error) {
 func findFiles(
 	ctx context.Context,
 	nidx *nameIndex,
-	bucket *gridfs.Bucket,
+	bucket *mongo.GridFSBucket,
 	opts store.PullOptions,
-) ([]gridfs.File, error) {
+) ([]mongo.GridFSFile, error) {
 	docs := make([]filter.Document, 0, len(nidx.nameToDoc))
 	for decryptedFileName, file := range nidx.nameToDoc {
 		_, gfsMeta, _ := nidx.nameDoc.get(decryptedFileName)
@@ -169,17 +164,19 @@ func findFiles(
 		filter = bson.D{{Key: "filename", Value: bson.D{{Key: "$in", Value: filteredNames}}}}
 	}
 
-	cur, err := bucket.Find(filter)
+	cur, err := bucket.Find(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find documents: %w", err)
 	}
 
-	gfiles := []gridfs.File{}
+	gfiles := []mongo.GridFSFile{}
 	for cur.Next(ctx) {
-		f := gridfs.File{}
+		f := mongo.GridFSFile{}
 		if err := cur.Decode(&f); err != nil {
 			return nil, fmt.Errorf("failed to decode document: %w", err)
 		}
+
+		fmt.Println(f)
 
 		gfiles = append(gfiles, f)
 	}
@@ -242,7 +239,7 @@ type errorDocument struct {
 func encryptedPullWorker(
 	ctx context.Context,
 	s *Store,
-	files <-chan gridfs.File,
+	files <-chan mongo.GridFSFile,
 	results chan<- errorDocument,
 	opts store.PullOptions,
 ) {
@@ -257,6 +254,7 @@ func encryptedPullWorker(
 		_, gfsMeta, ok := s.nameIndex.nameDoc.get(actualName)
 		if !ok {
 			s.nameIndex.nameDoc.add(actualName, &file, newGridFSMetadata(nil))
+			_, gfsMeta, _ = s.nameIndex.nameDoc.get(actualName)
 		}
 
 		docName := actualName
@@ -269,8 +267,11 @@ func encryptedPullWorker(
 			Metadata: gfsMeta.Diskhop,
 		}
 
-		stream, err := s.bucket.OpenDownloadStream(file.ID)
+		fmt.Println(file.ID)
+
+		stream, err := s.bucket.OpenDownloadStream(ctx, file.ID)
 		if err != nil {
+			fmt.Println(1, err)
 			results <- errorDocument{err: fmt.Errorf("failed to open download stream: %w", err)}
 
 			return
@@ -278,6 +279,7 @@ func encryptedPullWorker(
 
 		data := make([]byte, file.Length)
 		if _, err := io.ReadFull(stream, data); err != nil {
+			fmt.Println(err)
 			results <- errorDocument{err: fmt.Errorf("failed to read from stream: %w", err)}
 
 			return
@@ -286,6 +288,7 @@ func encryptedPullWorker(
 		// Decrypt the data.
 		decData, err := opts.SealOpener.Open(ctx, data)
 		if err != nil {
+			fmt.Println(err)
 			results <- errorDocument{err: fmt.Errorf("failed to decrypt data: %w", err)}
 
 			return
@@ -321,12 +324,14 @@ func (s *Store) EncryptedPull(
 
 	desc := &store.PullDescription{Count: count}
 
+	fmt.Println(files)
+
 	go func() {
 		if opts.DescribeOnly {
 			return
 		}
 
-		filesCh := make(chan gridfs.File, count)
+		filesCh := make(chan mongo.GridFSFile, count)
 		results := make(chan errorDocument, count)
 
 		workerCount := opts.Workers
@@ -415,10 +420,10 @@ func (s *Store) Revert(ctx context.Context, sha string) error {
 		return fmt.Errorf("failed to find file names: %w", err)
 	}
 
-	fileIDs := []primitive.ObjectID{}
+	fileIDs := []bson.ObjectID{}
 	for cur.Next(ctx) {
 		file := struct {
-			ID primitive.ObjectID `bson:"_id"`
+			ID bson.ObjectID `bson:"_id"`
 		}{}
 
 		if err := cur.Decode(&file); err != nil {
@@ -431,16 +436,16 @@ func (s *Store) Revert(ctx context.Context, sha string) error {
 	// TODO: this is naieve, but it will work for beta.
 	for _, id := range fileIDs {
 		// Delete file by ID
-		err = s.bucket.Delete(id)
+		err = s.bucket.Delete(ctx, id)
 		if err != nil {
 			return fmt.Errorf("failed to delete file by ID: %w", err)
 		}
 	}
 
 	// Convert filenaes into object ids
-	fnAsOIDs := make([]primitive.ObjectID, 0, len(fileNames))
+	fnAsOIDs := make([]bson.ObjectID, 0, len(fileNames))
 	for _, name := range fileNames {
-		oid, err := primitive.ObjectIDFromHex(name)
+		oid, err := bson.ObjectIDFromHex(name)
 		if err != nil {
 			return fmt.Errorf("failed to convert file name to object ID: %w", err)
 		}

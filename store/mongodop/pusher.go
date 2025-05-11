@@ -22,14 +22,13 @@ import (
 	"io"
 
 	"github.com/prestonvasquez/diskhop/store"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/gridfs"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type Pusher struct {
-	bucket    *gridfs.Bucket
+	bucket    *mongo.GridFSBucket
 	nameIndex *nameIndex
 }
 
@@ -55,7 +54,7 @@ func (p *Pusher) Push(ctx context.Context, name string, r io.ReadSeeker, opts ..
 // pushEncryptedTagChange pushes an encrypted object with a tag change.
 func (p *Pusher) pushEncryptedTagChange(
 	ctx context.Context,
-	originalFile *gridfs.File,
+	originalFile *mongo.GridFSFile,
 	meta *gridfsMetadata,
 	r io.ReadSeeker,
 	opts store.PushOptions,
@@ -71,7 +70,7 @@ func (p *Pusher) pushEncryptedTagChange(
 	}
 
 	// Update the metadata.
-	updateOptions := options.Update().SetUpsert(true)
+	updateOptions := options.UpdateOne().SetUpsert(true)
 	updateDoc := bson.D{{Key: "$set", Value: bson.D{{Key: "metadata", Value: encGfsMeta}}}}
 
 	filter := bson.D{{Key: "filename", Value: originalFile.Name}}
@@ -79,14 +78,14 @@ func (p *Pusher) pushEncryptedTagChange(
 		return "", fmt.Errorf("failed to update metadata: %w", err)
 	}
 
-	return originalFile.ID.(primitive.ObjectID).Hex(), nil
+	return originalFile.ID.(bson.ObjectID).Hex(), nil
 }
 
 // encryptedExistsPush pushes an encrypted object that already exists in the
 // bucket.
 func (p *Pusher) pushEncryptedChange(
 	ctx context.Context,
-	originalFile *gridfs.File,
+	originalFile *mongo.GridFSFile,
 	meta *gridfsMetadata,
 	r io.ReadSeeker,
 	opts store.PushOptions,
@@ -108,7 +107,7 @@ func (p *Pusher) pushEncryptedChange(
 
 	// If absolutely nothing has changed, do nothing.
 	if noDataChange && noTagChange {
-		return originalFile.ID.(primitive.ObjectID).Hex(), nil
+		return originalFile.ID.(bson.ObjectID).Hex(), nil
 	}
 
 	// If there is just a tag change, update the metadata.
@@ -176,7 +175,7 @@ func (p *Pusher) pushEncrypted(
 	}
 
 	var (
-		newObjectID = primitive.NewObjectID()
+		newObjectID = bson.NewObjectID()
 		gridFSOpts  = options.GridFSUpload()
 	)
 
@@ -185,30 +184,32 @@ func (p *Pusher) pushEncrypted(
 	}
 
 	// Perform a full upload.
-	id, err := p.bucket.UploadFromStream(newObjectID.Hex(), bytes.NewReader(ciphertext), gridFSOpts)
+	id, err := p.bucket.UploadFromStream(ctx, newObjectID.Hex(), bytes.NewReader(ciphertext), gridFSOpts)
 	if err != nil {
 		return "", fmt.Errorf("failed to upload file: %w", err)
 	}
 
 	if originalFile == nil {
-		originalFile = &gridfs.File{}
+		originalFile = &mongo.GridFSFile{}
 	}
 
-	p.nameIndex.nameDoc.add(name, &gridfs.File{ID: id, Name: newObjectID.Hex(), Length: int64(len(byts))}, meta)
+	fmt.Println(id)
+
+	p.nameIndex.nameDoc.add(name, &mongo.GridFSFile{ID: id, Name: newObjectID.Hex(), Length: int64(len(byts))}, meta)
 	p.nameIndex.hexName.add(newObjectID.Hex(), name)
 
 	newIDAsHex := newObjectID.Hex()
 
 	// If the original file exists at this point, it's a duplicate and we
 	// should delete it.
-	if pid, _ := originalFile.ID.(primitive.ObjectID); !pid.IsZero() {
-		if err := p.bucket.Delete(pid); err != nil && !errors.Is(err, gridfs.ErrFileNotFound) {
+	if pid, _ := originalFile.ID.(bson.ObjectID); !pid.IsZero() {
+		if err := p.bucket.Delete(ctx, pid); err != nil && !errors.Is(err, mongo.ErrFileNotFound) {
 			return newIDAsHex, fmt.Errorf("failed to remove the old data with id %q from bucket: %w", pid, err)
 		}
 	}
 
 	if originalFile.Name != "" {
-		originalObjectID, err := primitive.ObjectIDFromHex(originalFile.Name)
+		originalObjectID, err := bson.ObjectIDFromHex(originalFile.Name)
 		if err != nil {
 			return newIDAsHex, fmt.Errorf("failed to convert original name to object ID: %w", err)
 		}

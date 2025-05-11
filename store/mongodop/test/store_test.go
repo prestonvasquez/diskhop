@@ -25,8 +25,8 @@ import (
 	"github.com/prestonvasquez/diskhop/store/mongodop"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/mongodb"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const testdataDir = "../../../testdata"
@@ -50,7 +50,7 @@ func newTestStore(t *testing.T, ctx context.Context, bucketName string) *test.Te
 	// Create a connection to the test server for setup and teardown.
 	clientOpts := options.Client().ApplyURI(uri)
 
-	client, err := mongo.Connect(context.Background(), clientOpts)
+	client, err := mongo.Connect(clientOpts)
 	require.NoError(t, err, "failed to connect to mongodb")
 
 	// Create a connection to the test server to test diskhop behavior.
@@ -84,7 +84,7 @@ func newTestMigrator(t *testing.T, ctx context.Context, src, target string) *tes
 	clientOpts := options.Client().ApplyURI(uri)
 
 	// Drop the database before and after test.
-	client, err := mongo.Connect(context.Background(), clientOpts)
+	client, err := mongo.Connect(clientOpts)
 	require.NoError(t, err, "failed to connect to mongodb")
 
 	migrator, err := mongodop.ConnectMigrator(context.Background(), uri, database, src, target)
@@ -133,7 +133,7 @@ func setup(t *testing.T, ctx context.Context) {
 	clientOpts := options.Client().ApplyURI(uri)
 
 	// Drop the database before and after test.
-	client, err := mongo.Connect(context.Background(), clientOpts)
+	client, err := mongo.Connect(clientOpts)
 	require.NoError(t, err, "failed to connect to mongodb")
 
 	defer func() { _ = client.Disconnect(context.Background()) }()

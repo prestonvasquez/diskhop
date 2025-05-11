@@ -21,10 +21,8 @@ import (
 	"regexp"
 
 	"github.com/prestonvasquez/diskhop/exp/dcrypto"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/gridfs"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 const (
@@ -53,8 +51,8 @@ func loadHexName(ctx context.Context, opener dcrypto.Opener, coll *mongo.Collect
 	}
 
 	type nameDoc struct {
-		ID   primitive.ObjectID `bson:"_id"`
-		Data primitive.Binary
+		ID   bson.ObjectID `bson:"_id"`
+		Data bson.Binary
 	}
 
 	for cur.Next(ctx) {
@@ -92,14 +90,14 @@ func (hn *hexName) get(hex string) (string, bool) {
 
 // nameDoc is a map of decrypted names to documents.
 type nameDoc struct {
-	nameToDoc      map[string]*gridfs.File    // decrypted name -> document
-	nameToMetadata map[string]*gridfsMetadata //  decrypted name -> metadata
+	nameToDoc      map[string]*mongo.GridFSFile // decrypted name -> document
+	nameToMetadata map[string]*gridfsMetadata   //  decrypted name -> metadata
 }
 
 // loadNameDoc loads the nameDoc map from the database.
 func loadNameDoc(ctx context.Context, opener dcrypto.Opener, coll *mongo.Collection, hexName *hexName) (*nameDoc, error) {
 	nd := &nameDoc{
-		nameToDoc:      make(map[string]*gridfs.File),
+		nameToDoc:      make(map[string]*mongo.GridFSFile),
 		nameToMetadata: make(map[string]*gridfsMetadata),
 	}
 
@@ -113,7 +111,7 @@ func loadNameDoc(ctx context.Context, opener dcrypto.Opener, coll *mongo.Collect
 	}
 
 	for cur.Next(ctx) {
-		file := gridfs.File{}
+		file := mongo.GridFSFile{}
 		if err := cur.Decode(&file); err != nil {
 			return nil, fmt.Errorf("failed to decode document: %w", err)
 		}
@@ -126,15 +124,14 @@ func loadNameDoc(ctx context.Context, opener dcrypto.Opener, coll *mongo.Collect
 		metadata, _ := decryptGridFSMetadata(ctx, opener, file.Metadata)
 
 		nd.add(fileName, &file, metadata)
-
 	}
 
 	return nd, nil
 }
 
-func (nd *nameDoc) add(name string, doc *gridfs.File, metadata *gridfsMetadata) {
+func (nd *nameDoc) add(name string, doc *mongo.GridFSFile, metadata *gridfsMetadata) {
 	if nd.nameToDoc == nil {
-		nd.nameToDoc = make(map[string]*gridfs.File)
+		nd.nameToDoc = make(map[string]*mongo.GridFSFile)
 		nd.nameToMetadata = make(map[string]*gridfsMetadata)
 	}
 
@@ -142,7 +139,7 @@ func (nd *nameDoc) add(name string, doc *gridfs.File, metadata *gridfsMetadata) 
 	nd.nameToMetadata[name] = metadata
 }
 
-func (nd *nameDoc) get(name string) (*gridfs.File, *gridfsMetadata, bool) {
+func (nd *nameDoc) get(name string) (*mongo.GridFSFile, *gridfsMetadata, bool) {
 	if nd.nameToDoc == nil {
 		return nil, nil, false
 	}

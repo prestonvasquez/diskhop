@@ -20,6 +20,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -427,8 +428,10 @@ func runTestCase(t *testing.T, test T, tc testCase) {
 
 		switch op.Action {
 		case "push":
+			fmt.Println(1)
 			runPushOperation(t, client, op, dir)
 		case "pull":
+			fmt.Println(2)
 			runPullOperation(t, client, op)
 		case "revert":
 			runRevertOperation(t, client, op)
