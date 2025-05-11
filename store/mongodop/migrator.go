@@ -22,10 +22,9 @@ import (
 	"math"
 
 	"github.com/prestonvasquez/diskhop/store"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/gridfs"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // Migrator is a store.EncPusher that migrates files from one MongoDB gridfs
@@ -33,9 +32,9 @@ import (
 type Migrator struct {
 	client           *mongo.Client
 	database         string
-	srcBucket        *gridfs.Bucket
+	srcBucket        *mongo.GridFSBucket
 	nameIndex        nameIndex
-	targetBucket     *gridfs.Bucket
+	targetBucket     *mongo.GridFSBucket
 	srcBucketName    string
 	targetBucketName string
 	targetNameColl   *mongo.Collection
@@ -44,10 +43,10 @@ type Migrator struct {
 var _ store.Pusher = &Migrator{}
 
 // ConnectMigrator connects to the MongoDB server and returns a new Migrator.
-func ConnectMigrator(ctx context.Context, connStr string, db, srcB, targB string) (*Migrator, error) {
+func ConnectMigrator(ctx context.Context, connStr string, dbName, srcB, targB string) (*Migrator, error) {
 	opts := options.Client().ApplyURI(connStr)
 
-	client, err := mongo.Connect(ctx, opts)
+	client, err := mongo.Connect(opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
@@ -57,32 +56,23 @@ func ConnectMigrator(ctx context.Context, connStr string, db, srcB, targB string
 		return nil, fmt.Errorf("failed to ping MongoDB server: %w", err)
 	}
 
-	fileColl := client.Database(db).Collection(srcB + "." + "files")
-	nameColl := client.Database(db).Collection(DefaultNameCollectionName)
+	db := client.Database(dbName)
 
-	srcBucket, err := gridfs.NewBucket(
-		client.Database(db),
-		options.GridFSBucket().SetName(srcB))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create bucket: %w", err)
-	}
+	fileColl := db.Collection(srcB + "." + "files")
+	nameColl := db.Collection(DefaultNameCollectionName)
 
-	targetBucket, err := gridfs.NewBucket(
-		client.Database(db),
-		options.GridFSBucket().SetName(targB))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create bucket: %w", err)
-	}
+	targetBucket := db.GridFSBucket(options.GridFSBucket().SetName(targB))
+	srcBucket := db.GridFSBucket(options.GridFSBucket().SetName(srcB))
 
 	pusher := &Migrator{
 		client:           client,
-		database:         db,
+		database:         dbName,
 		nameIndex:        nameIndex{coll: fileColl, nameColl: nameColl},
 		srcBucket:        srcBucket,
 		targetBucket:     targetBucket,
 		targetBucketName: targB,
 		srcBucketName:    srcB,
-		targetNameColl:   client.Database(db).Collection(DefaultNameCollectionName),
+		targetNameColl:   db.Collection(DefaultNameCollectionName),
 	}
 
 	return pusher, nil
@@ -121,7 +111,7 @@ func migrateByFileID(up *Migrator, id interface{}) error {
 	// Execute the aggregation pipeline for the chunks
 	_, err = srcChunksColl.Aggregate(context.TODO(), chunksPipeline)
 	if err != nil {
-		return fmt.Errorf("Error moving chunks:", err)
+		return fmt.Errorf("Error moving chunks: %w", err)
 	}
 
 	return nil
@@ -198,7 +188,7 @@ func (up *Migrator) Push(
 		}
 
 		// Download the file from source database.
-		stream, err := up.srcBucket.OpenDownloadStream(doc.ID)
+		stream, err := up.srcBucket.OpenDownloadStream(ctx, doc.ID)
 		if err != nil {
 			return "", fmt.Errorf("failed to open download stream: %w", err)
 		}
@@ -214,7 +204,7 @@ func (up *Migrator) Push(
 		gfsOpts := options.GridFSUpload().SetMetadata(encryptedMeta)
 
 		// Upload the file to target database.
-		uploadStream, err := up.targetBucket.OpenUploadStream(doc.Name, gfsOpts)
+		uploadStream, err := up.targetBucket.OpenUploadStream(ctx, doc.Name, gfsOpts)
 		if err != nil {
 			return "", fmt.Errorf("failed to open upload stream: %w", err)
 		}
@@ -228,7 +218,7 @@ func (up *Migrator) Push(
 	}
 
 	// Delete the file from source database.
-	err = up.srcBucket.Delete(doc.ID)
+	err = up.srcBucket.Delete(ctx, doc.ID)
 	if err != nil {
 		return "", fmt.Errorf("failed to delete file from source bucket: %w", err)
 	}
