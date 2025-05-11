@@ -35,6 +35,9 @@ type Pusher struct {
 
 var _ store.Pusher = &Pusher{}
 
+//// Attempt a push upload 3 times if
+//const maxUploadRetries = 3
+
 // Push pushes an object to the store.
 func (p *Pusher) Push(ctx context.Context, name string, r io.ReadSeeker, opts ...store.PushOption) (string, error) {
 	mergedOpts := store.PushOptions{}

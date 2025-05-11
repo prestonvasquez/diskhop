@@ -17,6 +17,7 @@ package diskhop
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -97,7 +98,12 @@ func (fp *FilePusher) Push(ctx context.Context, f *os.File, opts ...store.PushOp
 		return nil
 	}
 
+	var noClean bool
+
 	defer func() {
+		if noClean {
+			return
+		}
 		if err := Clean(entities); err != nil {
 			panic(err)
 		}
@@ -110,7 +116,9 @@ func (fp *FilePusher) Push(ctx context.Context, f *os.File, opts ...store.PushOp
 
 		fileID, err := fp.PushFromInfo(ctx, entry, opts...)
 		if err != nil {
-			return fmt.Errorf("failed to push file: %w", err)
+			noClean = true
+			log.Printf("failed to push file: %s\n", err)
+			//return fmt.Errorf("failed to push file: %w", err)
 		}
 
 		if commiter != nil {
@@ -119,6 +127,7 @@ func (fp *FilePusher) Push(ctx context.Context, f *os.File, opts ...store.PushOp
 
 		if fp.ProgressTracker != nil {
 			if err := fp.ProgressTracker.Add(1); err != nil {
+				noClean = true
 				return fmt.Errorf("failed to add to progress tracker: %w", err)
 			}
 		}

@@ -22,8 +22,15 @@ import (
 
 const DefaultSampleSize = 5
 
+type FileDescription struct {
+	Name string
+	Size int64
+}
+
 type PullDescription struct {
-	Count int
+	Count            int
+	Size             int64
+	FileDescriptions []FileDescription
 }
 
 // Puller is an interface that defines the behavior of pulling a slice of
@@ -35,12 +42,13 @@ type Puller interface {
 
 // PullOptions is a type for setting options for the pull operation.
 type PullOptions struct {
-	SampleSize   int    // The number of documents to pull.
-	Filter       string // Filter string
-	SealOpener   dcrypto.SealOpener
-	DescribeOnly bool
-	Workers      int
-	MaskName     bool // Use a UUID as a mask name
+	SampleSize        int    // The number of documents to pull.
+	Filter            string // Filter string
+	SealOpener        dcrypto.SealOpener
+	DescribeOnly      bool
+	DescribeFilesOnly bool
+	Workers           int
+	MaskName          bool // Use a UUID as a mask name
 }
 
 type PullOption func(*PullOptions)
