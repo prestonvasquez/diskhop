@@ -20,9 +20,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"time"
 
+	"github.com/prestonvasquez/diskhop/internal/progressreader"
 	"github.com/prestonvasquez/diskhop/store"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -205,7 +205,17 @@ func (p *Pusher) pushEncrypted(
 			time.Sleep(1 * time.Second)
 		}
 
-		id, err = p.bucket.UploadFromStream(ctx, newObjectID.Hex(), bytes.NewReader(ciphertext), gridFSOpts)
+		var source io.Reader
+		if opts.Progress != nil {
+			pr := progressreader.NewReader(bytes.NewReader(ciphertext), int64(len(ciphertext)), name, opts.Progress)
+			defer pr.Close()
+
+			source = pr
+		} else {
+			source = bytes.NewReader(ciphertext)
+		}
+
+		id, err = p.bucket.UploadFromStream(ctx, newObjectID.Hex(), source, gridFSOpts)
 		if err == nil {
 			break
 		}
@@ -216,7 +226,6 @@ func (p *Pusher) pushEncrypted(
 			retryable := false
 			for _, code := range transientErrorCodes {
 				if srvErr.HasErrorCode(code) {
-					log.Printf("Transient error code %d encountered, retrying upload for %q\n", code, name)
 					retryable = attempt < maxRetries
 					break
 				}

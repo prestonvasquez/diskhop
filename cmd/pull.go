@@ -22,16 +22,67 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/olekukonko/tablewriter"
 	"github.com/prestonvasquez/diskhop"
 	"github.com/prestonvasquez/diskhop/exp/dcrypto"
 	"github.com/prestonvasquez/diskhop/store"
-	"github.com/schollz/progressbar/v3"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 const defaultSampeSize = 5
+
+// pullWithProgress reads from a channel of ProgressName and updates a single line in-place
+func pullWithProgress(n int, progressCh <-chan store.NameProgress) {
+	formatter, ok := logrus.StandardLogger().Formatter.(*logrus.TextFormatter)
+	if !ok {
+		// fallback: simple logging
+		for pr := range progressCh {
+			logrus.Infof("%s: %6.2f%%", pr.Name, pr.Progress)
+		}
+		return
+	}
+
+	logrus.Infof("📥 Pulling data") // Update this line to update percentage over the entire progressCh
+
+	var oldName string
+	count := 1
+
+	// Loop over progress events
+	for pr := range progressCh {
+		if oldName != "" && oldName != pr.Name {
+			// Break for each new file.
+			os.Stdout.Write([]byte("\n"))
+			count++
+		}
+		oldName = pr.Name
+
+		// Build log entry
+		entry := &logrus.Entry{
+			Logger:  logrus.StandardLogger(),
+			Data:    logrus.Fields{},
+			Time:    time.Now(),
+			Level:   logrus.InfoLevel,
+			Message: fmt.Sprintf("  [%d/%d] %s: %6.2f%%", count, n, pr.Name, pr.Progress),
+		}
+
+		// Format without newline
+		lineBytes, err := formatter.Format(entry)
+		if err != nil {
+			continue
+		}
+		line := strings.TrimRight(string(lineBytes), "\n")
+
+		// Carriage return + overwrite
+		os.Stdout.Write([]byte("\r" + line))
+	}
+
+	// After channel closes, finalize with newline
+	os.Stdout.Write([]byte("\n"))
+}
 
 func runPull(cmd *cobra.Command, _ []string, opts store.PullOptions) error {
 	curDir, err := os.Getwd()
@@ -81,38 +132,16 @@ func runPull(cmd *cobra.Command, _ []string, opts store.PullOptions) error {
 
 	dp := diskhop.NewFilePuller(diskhopStore.puller)
 
-	trackerDone := make(chan struct{}, 1)
-	go func() {
-		defer close(trackerDone)
-
-		if opts.DescribeOnly || opts.DescribeFilesOnly {
-			return
-		}
-
-		total := <-dp.Total()
-		bar := progressbar.NewOptions(total,
-			progressbar.OptionEnableColorCodes(true),
-			progressbar.OptionShowBytes(true),
-			progressbar.OptionSetWidth(15),
-			progressbar.OptionSetDescription("[cyan][1/1][reset] Pulling data..."),
-			progressbar.OptionSetTheme(progressbar.Theme{
-				Saucer:        "[green]=[reset]",
-				SaucerHead:    "[green]>[reset]",
-				SaucerPadding: " ",
-				BarStart:      "[",
-				BarEnd:        "]",
-			}))
-
-		for range dp.Progress() {
-			bar.Add(1)
-		}
-	}()
-
 	pullOpts := []store.PullOption{
 		func(o *store.PullOptions) {
 			*o = opts
 		},
 	}
+
+	progressCh := make(chan store.NameProgress)
+	pullOpts = append(pullOpts, store.WithPullProgress(progressCh))
+
+	go pullWithProgress(opts.SampleSize, progressCh)
 
 	if key != nil {
 		block, err := aes.NewCipher(key)
@@ -135,7 +164,7 @@ func runPull(cmd *cobra.Command, _ []string, opts store.PullOptions) error {
 		return fmt.Errorf("failed to push: %w", err)
 	}
 
-	<-trackerDone
+	//<-trackerDone
 
 	description := [][]string{
 		{strconv.Itoa(desc.Count), strconv.FormatInt(int64(float64(desc.Size)/1e9), 10)},

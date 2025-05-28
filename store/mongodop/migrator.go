@@ -15,14 +15,19 @@
 package mongodop
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math"
+	"time"
 
+	"github.com/prestonvasquez/diskhop/internal/progressreader"
 	"github.com/prestonvasquez/diskhop/store"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/event"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -30,14 +35,15 @@ import (
 // Migrator is a store.EncPusher that migrates files from one MongoDB gridfs
 // bucket to another.
 type Migrator struct {
-	client           *mongo.Client
-	database         string
-	srcBucket        *mongo.GridFSBucket
-	nameIndex        nameIndex
-	targetBucket     *mongo.GridFSBucket
-	srcBucketName    string
-	targetBucketName string
-	targetNameColl   *mongo.Collection
+	client                  *mongo.Client
+	database                string
+	srcBucket               *mongo.GridFSBucket
+	nameIndex               nameIndex
+	targetBucket            *mongo.GridFSBucket
+	srcBucketName           string
+	targetBucketName        string
+	targetNameColl          *mongo.Collection
+	commandSucceededEventCh chan event.CommandSucceededEvent
 }
 
 var _ store.Pusher = &Migrator{}
@@ -78,7 +84,7 @@ func ConnectMigrator(ctx context.Context, connStr string, dbName, srcB, targB st
 	return pusher, nil
 }
 
-func migrateByFileID(up *Migrator, id interface{}) error {
+func migrateByFileID(up *Migrator, id interface{}, name string, progressCh chan<- store.NameProgress) error {
 	// If nothing has changed, then we use an aggregation pipeline to
 	// move the data from the source to the target.
 	pipeline := mongo.Pipeline{
@@ -134,6 +140,16 @@ func (up *Migrator) Push(
 		return "", fmt.Errorf("failed to load name index: %w", err)
 	}
 
+	if mergedOpts.Progress != nil {
+		mergedOpts.Progress <- store.NameProgress{Name: name, Progress: 0}
+	}
+
+	defer func() {
+		if mergedOpts.Progress != nil {
+			mergedOpts.Progress <- store.NameProgress{Name: name, Progress: 100}
+		}
+	}()
+
 	// Merge filtered data.
 	if mergedOpts.Filter != "" {
 		// Get the ids for the name.
@@ -155,7 +171,7 @@ func (up *Migrator) Push(
 		for _, id := range ids {
 			// TODO: Can this be variadic? I.e. pass a slice of ids rather than a
 			// single id at a time?
-			if err := migrateByFileID(up, id); err != nil {
+			if err := migrateByFileID(up, id, name, mergedOpts.Progress); err != nil {
 				return "", fmt.Errorf("failed to migrate by file ID: %w", err)
 			}
 		}
@@ -174,11 +190,10 @@ func (up *Migrator) Push(
 
 	// Merge file ID.
 	if !changed && err == nil {
-		if err := migrateByFileID(up, doc.ID); err != nil {
+		if err := migrateByFileID(up, doc.ID, name, mergedOpts.Progress); err != nil {
 			return "", err
 		}
 	} else {
-
 		meta.addTags(mergedOpts.Tags...)
 
 		// Add new tags and encrypt the metadata.
@@ -187,34 +202,76 @@ func (up *Migrator) Push(
 			return "", fmt.Errorf("failed to encrypt metadata: %w", err)
 		}
 
-		// Download the file from source database.
+		// download entire file into memory
 		stream, err := up.srcBucket.OpenDownloadStream(ctx, doc.ID)
 		if err != nil {
 			return "", fmt.Errorf("failed to open download stream: %w", err)
 		}
-
-		data := make([]byte, doc.Length)
-		_, err = stream.Read(data)
+		data, err := io.ReadAll(stream)
+		stream.Close()
 		if err != nil {
 			return "", fmt.Errorf("failed to read data from stream: %w", err)
 		}
 
-		stream.Close()
-
-		gfsOpts := options.GridFSUpload().SetMetadata(encryptedMeta)
-
-		// Upload the file to target database.
-		uploadStream, err := up.targetBucket.OpenUploadStream(ctx, doc.Name, gfsOpts)
-		if err != nil {
-			return "", fmt.Errorf("failed to open upload stream: %w", err)
+		maxRetries := mergedOpts.RetryPolicy.MaxRetries
+		if maxRetries == 0 {
+			maxRetries = 1
 		}
 
-		_, err = uploadStream.Write(data)
-		if err != nil {
-			return "", fmt.Errorf("failed to write data to stream: %w", err)
-		}
+		// now upload with retries + progress
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if attempt > 1 {
+				// simple exponential/back-off
+				time.Sleep(time.Duration(attempt) * time.Second)
+			}
 
-		uploadStream.Close()
+			// pick reader: wrap with progress if requested
+			var reader io.Reader
+			if mergedOpts.Progress != nil {
+				pr := progressreader.NewReader(
+					bytes.NewReader(data),
+					int64(len(data)),
+					name,
+					mergedOpts.Progress,
+				)
+				defer pr.Close()
+				reader = pr
+			} else {
+				reader = bytes.NewReader(data)
+			}
+
+			// open a fresh upload stream each attempt
+			uploadOpts := options.GridFSUpload().SetMetadata(encryptedMeta)
+			uploadStream, err := up.targetBucket.OpenUploadStream(ctx, doc.Name, uploadOpts)
+			if err != nil {
+				return "", fmt.Errorf("failed to open upload stream: %w", err)
+			}
+
+			// copy until error or EOF
+			if _, err = io.Copy(uploadStream, reader); err != nil {
+				uploadStream.Close()
+				// check for transient server errors
+				var srvErr mongo.ServerError
+				if errors.As(err, &srvErr) {
+					retryable := false
+					for _, code := range transientErrorCodes {
+						if srvErr.HasErrorCode(code) {
+							retryable = attempt < maxRetries
+							break
+						}
+					}
+					if retryable {
+						// go for another attempt
+						continue
+					}
+				}
+				return "", fmt.Errorf("failed to write data to stream: %w", err)
+			}
+
+			// close on success and grab the new ID
+			uploadStream.Close()
+			break
+		}
 	}
 
 	// Delete the file from source database.

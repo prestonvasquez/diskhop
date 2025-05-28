@@ -21,11 +21,13 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"strings"
+	"time"
 
 	"github.com/prestonvasquez/diskhop"
 	"github.com/prestonvasquez/diskhop/exp/dcrypto"
 	"github.com/prestonvasquez/diskhop/store"
-	"github.com/schollz/progressbar/v3"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -54,6 +56,75 @@ func extractName(arg string) (string, error) {
 	}
 
 	return "", fmt.Errorf("invalid format: %s. Must be 'migrate/{name}'", arg)
+}
+
+// pushWithProgress updates one file at a time, overwriting the same log line
+func pushWithProgress(dir string, progressCh <-chan store.NameProgress) error {
+	// grab Logrus text formatter
+	formatter, ok := logrus.StandardLogger().Formatter.(*logrus.TextFormatter)
+	if !ok {
+		// fallback: simple logging per update
+		for pr := range progressCh {
+			logrus.Infof("%s: %6.2f%%", pr.Name, pr.Progress)
+		}
+		return nil
+	}
+
+	// Get the number of files in the dir.
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	// Don't count hidden files.
+	var fileCount int
+	for _, file := range files {
+		if file.Name()[0] != '.' {
+			fileCount++
+		}
+	}
+
+	logrus.Infof("📤 Pushing data\n")
+
+	var oldName string
+	count := 1
+
+	type nameProgressKey struct {
+		Name     string
+		Progress float64
+	}
+
+	// consume progress events
+	for pr := range progressCh {
+		if oldName != "" && oldName != pr.Name {
+			// Break for each new file.
+			os.Stdout.Write([]byte("\n"))
+			count++
+		}
+
+		oldName = pr.Name
+
+		// build a formatted log entry
+		entry := &logrus.Entry{
+			Logger:  logrus.StandardLogger(),
+			Data:    logrus.Fields{},
+			Time:    time.Now(),
+			Level:   logrus.InfoLevel,
+			Message: fmt.Sprintf("  [%d/%d] %s: %6.2f%%", count, fileCount, pr.Name, pr.Progress),
+		}
+		lineBytes, err := formatter.Format(entry)
+		if err != nil {
+			continue
+		}
+		line := strings.TrimRight(string(lineBytes), "\n")
+
+		// Carriage return + overwrite
+		os.Stdout.Write([]byte("\r" + line))
+	}
+
+	// after done, move to next line
+	os.Stdout.Write([]byte("\n"))
+	return nil
 }
 
 func runPush(cmd *cobra.Command, args []string, opts store.PushOptions) error {
@@ -105,27 +176,16 @@ func runPush(cmd *cobra.Command, args []string, opts store.PushOptions) error {
 
 	defer f.Close()
 
-	// Read the directory contents
-	fileInfo, _ := f.Readdir(-1)
-
-	dopPusher.ProgressTracker = progressbar.NewOptions(len(fileInfo),
-		progressbar.OptionEnableColorCodes(true),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(15),
-		progressbar.OptionSetDescription("[cyan][1/1][reset] Pushing data..."),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "[green]=[reset]",
-			SaucerHead:    "[green]>[reset]",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}))
-
 	pushOpts := []store.PushOption{
 		func(o *store.PushOptions) {
 			*o = opts
 		},
 	}
+
+	progressCh := make(chan store.NameProgress)
+	pushOpts = append(pushOpts, store.WithPushNameProgress(progressCh))
+
+	go pushWithProgress(curDir, progressCh)
 
 	if key != nil {
 		block, err := aes.NewCipher(key)
@@ -166,7 +226,7 @@ func newPushCommand() *cobra.Command {
 
 	flags := store.PushOptions{}
 
-	cmd.Flags().IntVar(&flags.RetryPolicy.MaxRetries, "retries", 0, "number of retries to attempt on transient errors")
+	cmd.Flags().IntVar(&flags.RetryPolicy.MaxRetries, "retries", 3, "number of retries to attempt on transient errors")
 
 	cmd.Run = func(cmd *cobra.Command, args []string) {
 		if err := runPush(cmd, args, flags); err != nil {

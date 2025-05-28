@@ -70,6 +70,10 @@ func (fp *FilePuller) Pull(ctx context.Context, opts ...store.PullOption) (*stor
 			break
 		}
 
+		if doc == nil {
+			return nil, fmt.Errorf("nil document received")
+		}
+
 		file, err := os.Create(doc.Filename)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create file: %w", err)

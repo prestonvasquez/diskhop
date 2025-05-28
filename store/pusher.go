@@ -28,12 +28,18 @@ type Pusher interface {
 
 type PushOption func(*PushOptions)
 
+type NameProgress struct {
+	Name     string
+	Progress float64
+}
+
 // PushOptions defines the options for pushing an object.
 type PushOptions struct {
 	Tags        []string // Metadata tags to associate with the object.
 	SealOpener  dcrypto.SealOpener
 	Filter      string // Filter string
 	RetryPolicy RetryPolicy
+	Progress    chan NameProgress
 }
 
 // WithPushTags sets the tags for the object.
@@ -58,9 +64,16 @@ func WithPushFilter(filter string) PushOption {
 	}
 }
 
-// withPushRetryPolicy sets the retry policy for the push operation.
 func WithRetryPolicy(retryPolicy RetryPolicy) PushOption {
+	// withPushRetryPolicy sets the retry policy for the push operation.
 	return func(o *PushOptions) {
 		o.RetryPolicy = retryPolicy
+	}
+}
+
+func WithPushNameProgress(progress chan NameProgress) PushOption {
+	return func(o *PushOptions) {
+		// withPushProgress sets the progress channel for the push operation.
+		o.Progress = progress
 	}
 }

@@ -15,6 +15,7 @@
 package mongodop
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"fmt"
@@ -26,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/prestonvasquez/diskhop/exp/dcrypto"
 	"github.com/prestonvasquez/diskhop/internal/filter"
+	"github.com/prestonvasquez/diskhop/internal/progressreader"
 	"github.com/prestonvasquez/diskhop/store"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -263,6 +265,38 @@ type errorDocument struct {
 	err error
 }
 
+func readWithProgress(r io.Reader, total int64, name string, report func(string, float64)) ([]byte, error) {
+	var (
+		chunkSize int64 = 32 * 1024 // 32KB chunks
+		read      int64
+		buf       = make([]byte, 0, total)
+		scratch   = make([]byte, chunkSize)
+	)
+
+	for read < total {
+		toRead := chunkSize
+		if remaining := total - read; remaining < chunkSize {
+			toRead = remaining
+		}
+
+		n, err := r.Read(scratch[:toRead])
+		if n > 0 {
+			read += int64(n)
+			report(name, float64(read)/float64(total)*100)
+			buf = append(buf, scratch[:n]...)
+		}
+
+		if err != nil {
+			if err == io.EOF && read == total {
+				break
+			}
+			return nil, err
+		}
+	}
+
+	return buf, nil
+}
+
 func encryptedPullWorker(
 	ctx context.Context,
 	s *Store,
@@ -300,8 +334,19 @@ func encryptedPullWorker(
 			return
 		}
 
-		data := make([]byte, file.Length)
-		if _, err := io.ReadFull(stream, data); err != nil {
+		var source io.Reader = stream
+		if opts.Progress != nil {
+			source = progressreader.NewReader(stream, file.Length, actualName, opts.Progress)
+			defer source.(io.Closer).Close()
+		}
+
+		chunked := bufio.NewReaderSize(source, 32*1024) // 32KB chunks
+		data, err := readWithProgress(chunked, file.Length, actualName, func(s string, f float64) {
+			if opts.Progress != nil {
+				opts.Progress <- store.NameProgress{Name: s, Progress: f}
+			}
+		})
+		if err != nil {
 			results <- errorDocument{err: fmt.Errorf("failed to read from stream: %w", err)}
 
 			return

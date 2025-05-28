@@ -49,6 +49,7 @@ type PullOptions struct {
 	DescribeFilesOnly bool
 	Workers           int
 	MaskName          bool // Use a UUID as a mask name
+	Progress          chan NameProgress
 }
 
 type PullOption func(*PullOptions)
@@ -88,5 +89,11 @@ func WithWorkers(workers int) PullOption {
 func WithMaskName() PullOption {
 	return func(o *PullOptions) {
 		o.MaskName = true
+	}
+}
+
+func WithPullProgress(progress chan NameProgress) PullOption {
+	return func(o *PullOptions) {
+		o.Progress = progress
 	}
 }

@@ -17,7 +17,6 @@ package diskhop
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 
@@ -117,8 +116,6 @@ func (fp *FilePusher) Push(ctx context.Context, f *os.File, opts ...store.PushOp
 		fileID, err := fp.PushFromInfo(ctx, entry, opts...)
 		if err != nil {
 			noClean = true
-			log.Printf("failed to push file: %s\n", err)
-			//return fmt.Errorf("failed to push file: %w", err)
 		}
 
 		if commiter != nil {
